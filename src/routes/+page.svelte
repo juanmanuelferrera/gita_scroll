@@ -39,6 +39,8 @@
   let confirmReset    = $state(false);
   let animDir      = $state(0);
   let isAnimating  = $state(false);
+  let enterDir     = $state(0);       // 1 = el verso nuevo entra desde abajo, -1 = desde arriba
+  let hintSeen     = $state(true);    // la pista «desliza hacia arriba» se muestra hasta el primer cambio de verso
 
   // ── Computed ──────────────────────────────────────────────────────────────
   let verse    = $derived(verses[currentIndex]);
@@ -93,11 +95,14 @@
     readT[currentIndex] = Date.now(); persistT(); syncSoon(6000);
     animDir = dir;
     isAnimating = true;
+    if (!hintSeen) { hintSeen = true; save('sg_hint', '1'); }
     setTimeout(() => {
       currentIndex = next;
       showPurport = false;
       isAnimating = false;
       animDir = 0;
+      enterDir = dir; setTimeout(() => { enterDir = 0; }, 280);
+      appEl?.querySelectorAll('.home-card, .verse-content').forEach((el) => { el.scrollTop = 0; });
       save('sg_index', String(currentIndex));
       ixT = [currentIndex, Date.now()]; persistT(); syncSoon(6000);
     }, 200);
@@ -120,28 +125,37 @@
     bmT[currentIndex] = [Date.now(), s.has(currentIndex) ? 1 : 0]; persistT(); syncSoon(3000);
   }
 
-  // ── Keyboard / touch ──────────────────────────────────────────────────────
+  // ── Teclado / gestos: el verso cambia en VERTICAL (hacia arriba = siguiente), como en Reels ────────────
   function handleKeydown(e) {
     if (activeTab !== 'gita' && activeTab !== 'home') return;
-    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') navigate(1);
-    else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') navigate(-1);
+    if (e.key === 'ArrowDown' || e.key === 'PageDown' || e.key === 'ArrowRight') navigate(1);
+    else if (e.key === 'ArrowUp' || e.key === 'PageUp' || e.key === 'ArrowLeft') navigate(-1);
     else if (e.key === 'Escape') { showPurport = false; showShare = false; }
   }
 
+  // El texto de un verso largo se desplaza por dentro: solo cambia de verso si ya estás en el borde (arriba o abajo) de ese texto.
+  function edges(target, root) {
+    const el = target?.closest?.('.home-card, .verse-content') || root?.querySelector?.('.home-card, .verse-content');
+    if (!el) return { top: true, bottom: true };
+    return { top: el.scrollTop <= 1, bottom: el.scrollTop + el.clientHeight >= el.scrollHeight - 2 };
+  }
+
   function swipeable(node) {
-    let startX = 0, startY = 0;
+    let startX = 0, startY = 0, ed = { top: true, bottom: true };
 
     function onStart(e) {
       startX = e.touches[0].clientX;
       startY = e.touches[0].clientY;
+      ed = edges(e.target, node);                 // medido al empezar: si el dedo estaba desplazando el texto, no salta de verso a mitad
     }
 
     function onEnd(e) {
       const t = e.changedTouches[0];
       const dx = startX - t.clientX;
-      const dy = startY - t.clientY;
-      if (Math.abs(dx) > Math.abs(dy) * 1.2 && Math.abs(dx) > 40) {
-        navigate(dx > 0 ? 1 : -1);
+      const dy = startY - t.clientY;              // dy > 0: el dedo subió
+      if (Math.abs(dy) > Math.abs(dx) * 1.2 && Math.abs(dy) > 50) {
+        if (dy > 0 && ed.bottom) navigate(1);
+        else if (dy < 0 && ed.top) navigate(-1);
       }
     }
 
@@ -155,9 +169,13 @@
     };
   }
 
+  let lastWheel = 0;
   function handleWheel(e) {
     if (activeTab !== 'gita' && activeTab !== 'home') return;
-    if (Math.abs(e.deltaY) > 30) navigate(e.deltaY > 0 ? 1 : -1);
+    if (Math.abs(e.deltaY) < 30 || Date.now() - lastWheel < 650) return;   // la inercia del trackpad no debe saltar varios versos
+    const ed = edges(e.target, appEl);
+    if (e.deltaY > 0 && ed.bottom) { lastWheel = Date.now(); navigate(1); }
+    else if (e.deltaY < 0 && ed.top) { lastWheel = Date.now(); navigate(-1); }
   }
 
   // ── Persistence ───────────────────────────────────────────────────────────
@@ -227,6 +245,7 @@
     updateStreak();
     loadT();
     nudgeHidden = load('sg_nudge') === '1';
+    hintSeen = load('sg_hint') === '1';
     if (sync) syncRun();
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible' && sync && Date.now() - syncLast > 60000) syncSoon(500);
@@ -566,6 +585,8 @@
           class="home-card"
           class:slide-out-up={isAnimating && animDir === 1}
           class:slide-out-down={isAnimating && animDir === -1}
+          class:enter-up={enterDir === 1}
+          class:enter-down={enterDir === -1}
         >
           <div class="home-card-header">
             {#if isToday}
@@ -582,15 +603,12 @@
 
         </div>
 
-        <!-- Side chevrons: fixed to left/right of screen, vertically centered on the card -->
-        {#if currentIndex > 0}
-          <button class="side-chevron side-chevron-left" onclick={() => navigate(-1)} aria-label="Previous verse">
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
-          </button>
-        {/if}
+        <!-- Pista de gesto: asoma la tarjeta siguiente y un chevron que rebota -->
         {#if currentIndex < total - 1}
-          <button class="side-chevron side-chevron-right" onclick={() => navigate(1)} aria-label="Next verse">
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+          <div class="peek" aria-hidden="true"></div>
+          <button class="swipe-cue" onclick={() => navigate(1)} aria-label="Next verse">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><polyline points="18 15 12 9 6 15"/></svg>
+            {#if !hintSeen}<span>Swipe up for the next verse</span>{/if}
           </button>
         {/if}
 
@@ -667,6 +685,8 @@
           class="verse-content"
           class:slide-out-up={isAnimating && animDir === 1}
           class:slide-out-down={isAnimating && animDir === -1}
+          class:enter-up={enterDir === 1}
+          class:enter-down={enterDir === -1}
         >
           <div class="gita-verse-ref">Bhagavad-gītā {formatRef(verse.ref)}</div>
           <div class="devanagari centered">{verse.devanagari.replace(/\s*॥[०-९\d]+॥\s*$/, '')}</div>
@@ -674,23 +694,16 @@
             <div class="transliteration centered">{langData.transliteration}</div>
           {/if}
           <div class="translation gita-translation">{langData.translation}</div>
-
-          <!-- Swipe hint arrows (horizontal) -->
-          <div class="swipe-hints">
-            {#if currentIndex > 0}
-              <div class="swipe-hint swipe-hint-left">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
-              </div>
-            {/if}
-            {#if currentIndex < total - 1}
-              <div class="swipe-hint swipe-hint-right">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
-              </div>
-            {/if}
-          </div>
         </div>
       {:else}
         <div class="loading">{loadError || 'Loading…'}</div>
+      {/if}
+
+      {#if verse && currentIndex < total - 1}
+        <button class="swipe-cue" onclick={() => navigate(1)} aria-label="Next verse">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><polyline points="18 15 12 9 6 15"/></svg>
+          {#if !hintSeen}<span>Swipe up for the next verse</span>{/if}
+        </button>
       {/if}
 
       <!-- Bottom action bar -->
@@ -1103,23 +1116,6 @@
   }
   .app.dark .home-ref-badge { background: rgba(255,255,255,0.08); color: #a8a29e; }
 
-  .side-chevron {
-    position: absolute;
-    top: 50%;
-    transform: translateY(-50%);
-    background: none;
-    border: none;
-    padding: 16px 10px;
-    cursor: pointer;
-    opacity: 0.45;
-    color: inherit;
-    line-height: 0;
-    z-index: 2;
-  }
-  .side-chevron:active { opacity: 0.9; }
-  .side-chevron-left  { left: 0; }
-  .side-chevron-right { right: 0; }
-
   .home-bar {
     display: flex;
     align-items: center;
@@ -1227,30 +1223,24 @@
   .slide-out-up   { transform: translateY(-20px); opacity: 0; }
   .slide-out-down { transform: translateY(20px);  opacity: 0; }
 
-  /* Swipe hint arrows (horizontal) */
-  .swipe-hints {
-    position: absolute;
-    top: 50%; left: 0; right: 0;
-    transform: translateY(-50%);
-    display: flex;
-    justify-content: space-between;
-    pointer-events: none;
-    padding: 0 0.2rem;
+  /* Entrada del verso nuevo: desde abajo al avanzar, desde arriba al volver */
+  .enter-up   { animation: enter-up 0.24s ease; }
+  .enter-down { animation: enter-down 0.24s ease; }
+  @keyframes enter-up   { from { transform: translateY(36px);  opacity: 0; } to { transform: none; opacity: 1; } }
+  @keyframes enter-down { from { transform: translateY(-36px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+  /* Pista de gesto: chevron que rebota (con texto hasta el primer cambio de verso) y, en Home, el borde de la tarjeta siguiente */
+  .swipe-cue {
+    display: flex; align-items: center; justify-content: center; gap: 0.35rem; align-self: center; flex-shrink: 0;
+    background: none; border: none; color: #b45309; cursor: pointer; padding: 0.15rem 0.8rem;
+    font-family: system-ui, sans-serif; font-size: 0.78rem; font-weight: 600; animation: cue-bob 1.7s ease-in-out infinite;
   }
-  .swipe-hint {
-    opacity: 0.15;
-    color: currentColor;
-  }
-  .swipe-hint-left  { animation: pulse-left  2.5s ease-in-out infinite; }
-  .swipe-hint-right { animation: pulse-right 2.5s ease-in-out infinite; }
-  @keyframes pulse-left {
-    0%, 100% { opacity: 0.1; transform: translateX(0); }
-    50%      { opacity: 0.25; transform: translateX(-3px); }
-  }
-  @keyframes pulse-right {
-    0%, 100% { opacity: 0.1; transform: translateX(0); }
-    50%      { opacity: 0.25; transform: translateX(3px); }
-  }
+  .app.dark .swipe-cue { color: #f0b45a; }
+  .swipe-cue:active { opacity: 0.6; }
+  @keyframes cue-bob { 0%, 100% { transform: translateY(2px); opacity: 0.55; } 50% { transform: translateY(-4px); opacity: 1; } }
+  .peek { flex-shrink: 0; height: 12px; margin: -0.55rem 1.1rem 0; border-radius: 0 0 14px 14px; background: white; opacity: 0.7; box-shadow: 0 2px 6px rgba(0,0,0,0.07); }
+  .app.dark .peek { background: #1e1b14; opacity: 0.8; }
+  @media (prefers-reduced-motion: reduce) { .swipe-cue { animation: none; } }
 
   .gita-translation { font-size: 1.2rem; line-height: 1.85; }
 
