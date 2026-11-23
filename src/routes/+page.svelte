@@ -27,6 +27,8 @@
   let installed  = $state(false);      // ya instalada / abierta como app
   let isIOS      = $state(false);      // iPhone/iPad (Safari): no hay botón; se enseñan los pasos
   let showIOS    = $state(false);
+  let installOpen = $state(true);      // tarjeta desplegada o reducida a una línea (como la de «Save your progress»)
+  function setInstallOpen(v) { installOpen = v; save('sg_install_open', v ? '1' : '0'); }
   let inTauri    = false;
   const canInstall = $derived(!installed && !inTauri && (installEvt !== null || isIOS));
   async function installApp() {
@@ -296,6 +298,7 @@
     loadT();
     nudgeHidden = load('sg_nudge') === '1';
     syncOpen = load('sg_sync_open') !== '0';
+    installOpen = load('sg_install_open') !== '0';
     inTauri = '__TAURI_INTERNALS__' in window || '__TAURI__' in window;
     installed = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
     isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -806,15 +809,23 @@
       {#if canInstall}
         <div class="section-label">Install the app</div>
         <div class="sync-card">
-          <p class="sync-text" style="margin-bottom:0.7rem">Add Scroll Gita to your home screen: it opens full screen and works without a connection.</p>
-          {#if installEvt}
-            <div class="sync-btns"><button class="sync-btn primary" onclick={installApp}>Install</button></div>
+          {#if !installOpen}
+            <button class="sync-mini" onclick={() => setInstallOpen(true)} aria-expanded="false">
+              <span>Add to your home screen</span>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><polyline points="6 9 12 15 18 9"/></svg>
+            </button>
           {:else}
-            <div class="sync-btns"><button class="sync-btn primary" onclick={() => showIOS = !showIOS} aria-expanded={showIOS}>How to install</button></div>
-            {#if showIOS}
-              <p class="sync-text" style="margin:0.7rem 0 0">In Safari, tap <b>Share</b>
-                <svg class="inline-share" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V3M8 7l4-4 4 4M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/></svg>
-                at the bottom of the screen, then choose <b>Add to Home Screen</b>.</p>
+            <button class="sync-close" aria-label="Close" onclick={() => setInstallOpen(false)}>×</button>
+            <p class="sync-text" style="margin-bottom:0.7rem; padding-right:2rem">Add Scroll Gita to your home screen: it opens full screen and works without a connection.</p>
+            {#if installEvt}
+              <div class="sync-btns"><button class="sync-btn primary" onclick={installApp}>Install</button></div>
+            {:else}
+              <div class="sync-btns"><button class="sync-btn primary" onclick={() => showIOS = !showIOS} aria-expanded={showIOS}>How to install</button></div>
+              {#if showIOS}
+                <p class="sync-text" style="margin:0.7rem 0 0">In Safari, tap <b>Share</b>
+                  <svg class="inline-share" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V3M8 7l4-4 4 4M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/></svg>
+                  at the bottom of the screen, then choose <b>Add to Home Screen</b>.</p>
+              {/if}
             {/if}
           {/if}
         </div>
@@ -1364,7 +1375,7 @@
 
   /* ── Copia en la nube ───────────────────────────────────────────────── */
   .sync-card { position: relative; background: white; border-radius: 12px; padding: 0.9rem 1rem; font-family: system-ui, sans-serif; }
-  .sync-close { position: absolute; top: 0.35rem; right: 0.4rem; width: 2.4rem; height: 2.4rem; background: none; border: none; font-size: 1.7rem; line-height: 1; color: inherit; opacity: 0.5; cursor: pointer; }
+  .sync-close { position: absolute; top: 0.35rem; right: 0.4rem; width: 2.4rem; height: 2.4rem; background: none; border: none; font-size: 1.7rem; line-height: 1; color: inherit; opacity: 0.5; cursor: pointer; z-index: 1; }
   .sync-mini { display: flex; align-items: center; justify-content: space-between; width: 100%; background: none; border: none; color: inherit; font: inherit; font-size: 0.92rem; padding: 0.2rem 0; cursor: pointer; text-align: left; }
   .sync-mini-code { font-family: ui-monospace, Menlo, monospace; letter-spacing: 0.12em; }
   .app.dark .sync-card { background: #1e1b14; }
