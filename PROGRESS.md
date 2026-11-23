@@ -1,7 +1,7 @@
 # Scroll Gita
 
-Estado: app en producción en vedabase.cc/scrollgita (23-nov). Copia en la nube añadida (Profile): mismo servidor y código de 8 consonantes que Easy Study (`/api/study`), lógica en `src/lib/sync.js` (8 tests: `node --test test/sync.test.mjs`; prueba con el servidor real: `node test/e2e-two-devices.mjs`, crea 1 copia).
-Siguiente: desplegar la versión con copia en la nube (compilar con `BASE_PATH=/scrollgita npm run build`, copiar a `astro_vedabase/public/scrollgita/` sin los JSON grandes, desplegar con `ship`); Android (`npm run tauri android init`).
+Estado: **23-nov, EN PRODUCCIÓN en vedabase.cc/scrollgita y todo subido (`7ea1c6a`, repo público `juanmanuelferrera/gita_scroll`)**: PWA instalable (manifiesto, service worker, icono «गी», tarjeta «Install the app» en Profile plegable), copia en la nube (mismo servidor que Easy Study), Home al azar / Gita en orden, scroll vertical, interfaz completa en 10 idiomas con árabe reflejado, accesibilidad (44 px, AA, foco atrapado, aria, región en vivo). Crítica de Impeccable: 27/40 → 24/40 (otra revisión, más estricta); tras esos arreglos aún sin repetir.
+Siguiente: **repetir `/impeccable critique`** y ver la nota; **revisar las traducciones de la interfaz con lectores nativos** (hindi, bengalí, árabe, chino; dudas: rótulos de iOS en pt/bul/bn, «Bookmarks» en árabe); probar en móvil real (instalar PWA, lector de pantalla, zoom 200 %). Publicar un cambio: `BASE_PATH=/scrollgita npm run build`, copiar `build/` a `astro_vedabase/public/scrollgita/` sin `gita_all_langs.json`, `gita.json` ni los 3 `.svg`, y `npm run deploy` purgando también `/scrollgita/service-worker.js`. Pendientes menores: licencia del repo, decidir si el crédito a One Scroll Gita va también en la app (dijo que no), Android (`npm run tauri android init`).
 
 ## Stack
 - Tauri v2 + SvelteKit + Svelte 5 runes
