@@ -4,6 +4,8 @@ A quiet way to read the *Bhagavad-gītā As It Is*, one verse at a time.
 
 **Live:** <https://vedabase.cc/scrollgita/> · No account, no ads, and the app itself has no analytics.
 
+The idea of reading the Gītā as a vertical scroll, one verse at a time, comes from **[One Scroll Gita](https://play.google.com/store/apps/details?id=com.onescrollgita.app)** by Devang Sonawane (Google Play). Scroll Gita is an independent project and shares no code with it.
+
 Open the app and you are on today's verse: Sanskrit, transliteration and translation. Swipe up for another verse. The text is available in 10 languages (English, Español, Português, हिन्दी, বাংলা, 中文, Български, Français, Русский, العربية), with the purports one tap away.
 
 ## What it does
@@ -86,6 +88,11 @@ test/                     unit tests and the two-device test
 scripts/                  data pipeline
 src-tauri/                Tauri shell and release workflow (.github/workflows/release.yml, runs on `v*` tags)
 ```
+
+## Credits
+
+- **Idea:** [One Scroll Gita](https://play.google.com/store/apps/details?id=com.onescrollgita.app) by Devang Sonawane, an Android app for reading the Bhagavad-gītā verse by verse in a vertical scroll. Thank you for the inspiration.
+- Cloud copy code format and server: shared with [Easy Study](https://vedabase.cc/read/) on vedabase.cc.
 
 ## Texts and license
 
