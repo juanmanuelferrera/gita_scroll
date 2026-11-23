@@ -390,7 +390,11 @@
   }
 
   $effect(() => { if (ready && currentLang) { save('sg_lang', currentLang); ensureLang(currentLang); } });
-  $effect(() => { if (ready) save('sg_dark', darkMode ? '1' : '0'); });
+  $effect(() => {
+    if (!ready) return;
+    save('sg_dark', darkMode ? '1' : '0');
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', darkMode ? '#111009' : '#f8f4ee');   // la barra del móvil sigue al tema de la app
+  });
   $effect(() => { if (activeTab !== 'profile') confirmReset = false; });
 
   // ── Helpers ───────────────────────────────────────────────────────────────

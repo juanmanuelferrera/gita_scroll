@@ -26,11 +26,53 @@ Profile → **Save my progress** gives you a short code of 8 consonants (for exa
 - **Anyone who has the code can read the copy.** Keep it private. Copies expire after about 18 months without use.
 - The server does not send CORS headers, so the cloud copy only works when the app is served from `vedabase.cc` (it does not work from `localhost` or the desktop build).
 
+## Install it (PWA)
+
+Scroll Gita is a Progressive Web App: you can put it on your home screen, open it full screen like any other app, and read without a connection.
+
+**Install**
+
+- **Android (Chrome):** open <https://vedabase.cc/scrollgita/>, menu ⋮ → **Install app** (or **Add to Home screen**).
+- **iPhone / iPad (Safari):** Share → **Add to Home Screen**. (iOS has no install button; this is the only way.)
+- **Desktop (Chrome, Edge):** the install icon at the right end of the address bar.
+
+**Offline**
+
+- The app itself, the verse index and **English** are saved the first time you open it, so it starts with no connection.
+- Every **other language** is saved the first time you use it, and refreshed quietly in the background afterwards. A language you have never opened needs a connection once; without one, its verses show in English.
+- Bookmarks, streak and reading position are stored on the device, so they work offline too. The cloud copy needs a connection and tries again when it returns.
+- The page itself is fetched from the network first, so a new version arrives as soon as you are online; the saved copy is only the fallback.
+
+**How it is built**
+
+| Piece | File | What it does |
+|---|---|---|
+| Manifest | [`static/manifest.webmanifest`](static/manifest.webmanifest) | Name, icons, colours, `standalone` display. Paths are relative, so it works at `/scrollgita/` and at the root. |
+| Service worker | [`src/service-worker.js`](src/service-worker.js) | SvelteKit builds and registers it. Precaches the app files and icons plus `data/core.json` and `data/en.json`; language files are cached on first use; navigation is network-first. |
+| Page tags | [`src/app.html`](src/app.html) | Manifest link, `apple-touch-icon`, `theme-color`, iOS web-app tags. The theme colour follows the light/dark switch. |
+| Icons | `static/icons/`, `static/favicon.png` | 192 and 512 px "any" icons with rounded corners, a full-bleed 512 px "maskable" icon, and a 180 px iOS icon. |
+
+- The worker only handles requests under its own path (`/scrollgita/`). The cloud-copy calls to `/api/study` and the rest of vedabase.cc go straight to the network.
+- Each build has a new cache name, and the previous one is deleted when the new worker activates. Language files live in a separate cache that survives updates.
+- During `npm run dev` the worker does nothing (there are no compiled files to cache), and the desktop (Tauri) build does not use it.
+- Installability was checked with Chrome's own installability report (no errors apart from "incognito", because the test browser was incognito). Offline start was tested by stopping the server. Not tested yet: installing on a physical iPhone and Android phone.
+
+**The icon.** The Sanskrit syllable **गी** (*gī*) in cream on a warm ochre-to-sienna gradient, with two chevrons underneath that echo the swipe-up gesture. The drawing sits inside the central 80 % circle so Android's adaptive masks do not crop it. The source is [`scripts/icon/icon.html`](scripts/icon/icon.html), set in *Tiro Devanagari Sanskrit* (SIL Open Font License). To redraw it:
+
+```bash
+# put TiroDevanagariSanskrit-Regular.ttf (Google Fonts) next to icon.html, then:
+npm i -D playwright && npx playwright install chromium   # or run with PW_CHANNEL=chrome
+node scripts/icon/render.mjs                             # draws the 1024 px PNGs
+python3 -I scripts/icon/make_icons.py                    # writes static/icons/* and static/favicon.png
+```
+
+`scripts/icon/icon-1024.png` is the master image. It can also feed the desktop and mobile icons: `npx tauri icon scripts/icon/icon-1024.png` (the Tauri icons in `src-tauri/icons/` are still the default ones).
+
 ## Tech
 
 - [SvelteKit](https://svelte.dev/docs/kit) (Svelte 5 runes) with `adapter-static`, single-page app (`ssr = false`).
 - [Tauri v2](https://v2.tauri.app/) for the desktop and mobile builds (`src-tauri/`, identifier `cc.vedabase.gitascroll`).
-- No backend of its own. The web build is plain static files.
+- No backend of its own. The web build is plain static files, installable as a PWA (manifest + service worker).
 
 ## Run it
 
@@ -56,7 +98,7 @@ The site is served under a sub-path, so the base path is set at build time (the 
 BASE_PATH=/scrollgita npm run build
 ```
 
-The output is in `build/`. For vedabase.cc it is copied to `public/scrollgita/` in the `astro_vedabase` repo **without** the big source files (`gita_all_langs.json`, `gita.json`, the three `.svg` placeholders), and deployed with the rest of the site. After building for the web, rebuild without `BASE_PATH` before packaging the Tauri app.
+The output is in `build/`. For vedabase.cc it is copied to `public/scrollgita/` in the `astro_vedabase` repo **without** the big source files (`gita_all_langs.json`, `gita.json`, the three `.svg` placeholders), and deployed with the rest of the site. Copy the rest of `build/` whole: the service worker lists every compiled file and a missing one makes its installation fail. After building for the web, rebuild without `BASE_PATH` before packaging the Tauri app.
 
 ## Data
 
@@ -82,7 +124,10 @@ python3 -I scripts/split_langs.py   # → static/data/core.json and static/data/
 ```
 src/routes/+page.svelte   the whole app (Home, Gita, Profile)
 src/lib/sync.js           cloud copy: merge, pack, server client (pure, no DOM)
-src/app.html              page shell (includes noindex)
+src/app.html              page shell (noindex, PWA tags)
+src/service-worker.js     offline support (PWA)
+static/manifest.webmanifest, static/icons/   PWA manifest and icons
+scripts/icon/             source and scripts of the app icon
 static/data/              verse data (see above)
 test/                     unit tests and the two-device test
 scripts/                  data pipeline

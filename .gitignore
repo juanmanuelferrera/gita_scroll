@@ -4,3 +4,8 @@ build/
 src-tauri/target/
 src-tauri/gen/
 .DS_Store
+
+# icono: tipografía (OFL, se descarga aparte) y PNG intermedios
+scripts/icon/*.ttf
+scripts/icon/icon-1024-full.png
+scripts/icon/icon-1024-round.png
