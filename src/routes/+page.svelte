@@ -21,6 +21,8 @@
   let linkInput = $state('');
   let linkPreview = $state(null);      // { code, version, remote, n:{bookmarks,read,streak} }
   let nudgeHidden = $state(false);
+  let syncOpen = $state(true);         // tarjeta «Your progress is saved»: desplegada o reducida a una línea
+  function setSyncOpen(v) { syncOpen = v; save('sg_sync_open', v ? '1' : '0'); }
   let syncTimer = null, applying = false, syncLast = 0, firstSync = true;
   const SYNC_API = typeof location !== 'undefined' ? SY.apiBase(location.hostname) : '/api/study';
 
@@ -279,6 +281,7 @@
     updateStreak();
     loadT();
     nudgeHidden = load('sg_nudge') === '1';
+    syncOpen = load('sg_sync_open') !== '0';
     hintSeen = load('sg_hint') === '1';
     if (sync) syncRun();
     document.addEventListener('visibilitychange', () => {
@@ -349,7 +352,7 @@
     syncErr = ''; syncMsg = ''; syncBusy = true;
     try {
       const r = await SY.sj(SYNC_API, '/new', { method: 'POST', body: JSON.stringify({ data: SY.pack(localState()) }) });
-      sync = { code: r.code, version: r.version, at: Date.now() }; save('sg_sync', JSON.stringify(sync)); firstSync = false;
+      sync = { code: r.code, version: r.version, at: Date.now() }; save('sg_sync', JSON.stringify(sync)); firstSync = false; setSyncOpen(true);
     } catch (e) { syncErr = e.code === 'too_large' ? 'Your progress is too big for the cloud copy.' : 'Cloud copy is not available right now.'; }
     finally { syncBusy = false; }
   }
@@ -370,7 +373,7 @@
   }
   async function syncLinkConfirm() {
     const lp = linkPreview; linkPreview = null; linkOpen = false; linkInput = '';
-    sync = { code: lp.code, version: lp.version, at: 0 }; save('sg_sync', JSON.stringify(sync)); firstSync = true;
+    sync = { code: lp.code, version: lp.version, at: 0 }; save('sg_sync', JSON.stringify(sync)); firstSync = true; setSyncOpen(true);
     await syncRun();
     if (!syncErr) syncMsg = `Linked: ${bookmarks.size} bookmarks, ${readVerses.size} verses read.`;
   }
@@ -794,7 +797,13 @@
               <button class="sync-btn" onclick={() => { linkOpen = false; linkInput = ''; syncErr = ''; }}>Cancel</button>
             </div>
           {/if}
+        {:else if !syncOpen}
+          <button class="sync-mini" onclick={() => setSyncOpen(true)} aria-expanded="false">
+            <span>☁ Progress saved · <b class="sync-mini-code">{sync.code}</b></span>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><polyline points="6 9 12 15 18 9"/></svg>
+          </button>
         {:else}
+          <button class="sync-close" aria-label="Close" onclick={() => setSyncOpen(false)}>×</button>
           <p class="sync-lead">☁ Your progress is saved</p>
           <div class="sync-code" aria-label="Your code">{sync.code}</div>
           <p class="sync-text">Write this code down. To continue on another device, open Scroll Gita there, go to Profile and choose <b>I already have a code</b>. Anyone with the code can see your bookmarks, so keep it private.</p>
@@ -804,7 +813,7 @@
             <button class="sync-btn quiet" onclick={syncStop}>Stop saving</button>
           </div>
         {/if}
-        {#if syncStatus() || syncMsg}
+        {#if (syncStatus() || syncMsg) && (syncOpen || !sync || syncErr)}
           <p class="sync-status" class:bad={!!syncErr && !syncBusy} aria-live="polite">{syncMsg && !syncErr ? syncMsg : syncStatus()}</p>
         {/if}
       </div>
@@ -1308,7 +1317,10 @@
   .app.dark .profile-title { color: #d97706; }
 
   /* ── Copia en la nube ───────────────────────────────────────────────── */
-  .sync-card { background: white; border-radius: 12px; padding: 0.9rem 1rem; font-family: system-ui, sans-serif; }
+  .sync-card { position: relative; background: white; border-radius: 12px; padding: 0.9rem 1rem; font-family: system-ui, sans-serif; }
+  .sync-close { position: absolute; top: 0.35rem; right: 0.4rem; width: 2.4rem; height: 2.4rem; background: none; border: none; font-size: 1.7rem; line-height: 1; color: inherit; opacity: 0.5; cursor: pointer; }
+  .sync-mini { display: flex; align-items: center; justify-content: space-between; width: 100%; background: none; border: none; color: inherit; font: inherit; font-size: 0.92rem; padding: 0.2rem 0; cursor: pointer; text-align: left; }
+  .sync-mini-code { font-family: ui-monospace, Menlo, monospace; letter-spacing: 0.12em; }
   .app.dark .sync-card { background: #1e1b14; }
   .sync-lead { font-weight: 700; font-size: 1rem; margin: 0 0 0.35rem; }
   .sync-text { font-size: 0.86rem; line-height: 1.45; opacity: 0.75; margin: 0 0 0.7rem; }
