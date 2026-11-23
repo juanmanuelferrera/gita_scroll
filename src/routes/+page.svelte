@@ -597,12 +597,6 @@
             {#if streak > 1}
               <div class="home-streak">🔥 Day {streak} streak</div>
             {/if}
-            {#if !sync && readVerses.size >= 3 && !nudgeHidden}
-              <div class="home-nudge">
-                <button class="home-nudge-go" onclick={() => activeTab = 'profile'}>☁ Save your progress in the cloud →</button>
-                <button class="home-nudge-x" aria-label="Hide this" onclick={() => { nudgeHidden = true; save('sg_nudge', '1'); }}>×</button>
-              </div>
-            {/if}
           </div>
           <div class="home-header-right">
             <button class="lang-pill active" onclick={() => showLangPicker = true} aria-label="Change language">
@@ -618,6 +612,14 @@
             </button>
           </div>
         </div>
+
+        <!-- Aviso de la copia en la nube: fila propia (dentro de la columna de la fecha se partía en 2-3 líneas) -->
+        {#if !sync && readVerses.size >= 3 && !nudgeHidden}
+          <div class="home-nudge">
+            <button class="home-nudge-go" onclick={() => activeTab = 'profile'}>☁ Save your progress in the cloud →</button>
+            <button class="home-nudge-x" aria-label="Hide this" onclick={() => { nudgeHidden = true; save('sg_nudge', '1'); }}>×</button>
+          </div>
+        {/if}
 
         <!-- Card -->
         <div
@@ -1050,8 +1052,9 @@
     font-family: Georgia, 'Times New Roman', serif;
     transition: background 0.25s, color 0.25s;
     overflow: hidden;
+    --muted: #6b655d;
   }
-  .app.dark { background: #111009; color: #e8dfc8; }
+  .app.dark { background: #111009; color: #e8dfc8; --muted: #a8a190; }
 
   .screen {
     flex: 1;
@@ -1091,7 +1094,7 @@
     font-family: system-ui, sans-serif;
     font-size: 0.9rem;
     font-weight: 500;
-    opacity: 0.55;
+    color: var(--muted);
   }
 
   .home-streak {
@@ -1151,7 +1154,7 @@
   .home-translit {
     font-size: 1.15rem;
     font-style: italic;
-    color: #78716c;
+    color: var(--muted);
     text-align: center;
     line-height: 1.65;
     white-space: pre-line;
@@ -1184,7 +1187,7 @@
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    padding: 0.6rem 0.8rem;
+    padding: 0.3rem 0.8rem;
     flex-shrink: 0;
     border-bottom: 1px solid rgba(0,0,0,0.06);
   }
@@ -1211,6 +1214,7 @@
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='%23888'%3E%3Cpath d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");
     background-repeat: no-repeat;
     background-position: right 0.4rem center;
+    min-height: 44px;
   }
   .app.dark .selector {
     background-color: rgba(255,255,255,0.06);
@@ -1233,14 +1237,16 @@
     color: inherit;
     opacity: 0.6;
     transition: background 0.15s, opacity 0.15s;
+    position: relative;
   }
+  .lang-pill::after { content: ''; position: absolute; inset: -12px -6px; }   /* zona de toque de 44 px sin agrandar la píldora */
   .lang-pill.active {
     background: #b45309;
     color: white;
     opacity: 1;
   }
   .app.dark .lang-pill { background: rgba(255,255,255,0.08); }
-  .app.dark .lang-pill.active { background: #d97706; }
+  .app.dark .lang-pill.active { background: #b45309; }
 
   /* Progress bar */
   .progress-bar { height: 2px; background: rgba(0,0,0,0.05); flex-shrink: 0; }
@@ -1284,7 +1290,7 @@
   /* Pista de gesto: chevron que rebota (con texto hasta el primer cambio de verso) y, en Home, el borde de la tarjeta siguiente */
   .swipe-cue {
     display: flex; align-items: center; justify-content: center; gap: 0.35rem; align-self: center; flex-shrink: 0;
-    background: none; border: none; color: #b45309; cursor: pointer; padding: 0.15rem 0.8rem;
+    background: none; border: none; color: #b45309; cursor: pointer; min-height: 44px; padding: 0 0.8rem;
     font-family: system-ui, sans-serif; font-size: 0.78rem; font-weight: 600; animation: cue-bob 1.7s ease-in-out infinite;
   }
   .app.dark .swipe-cue { color: #f0b45a; }
@@ -1330,10 +1336,10 @@
   .sync-input { width: 100%; box-sizing: border-box; font-family: ui-monospace, Menlo, monospace; font-size: 1.3rem; letter-spacing: 0.16em; text-transform: uppercase; text-align: center; padding: 0.55rem; border: 1px solid rgba(0,0,0,0.2); border-radius: 10px; background: transparent; color: inherit; margin-bottom: 0.7rem; }
   .app.dark .sync-input { border-color: rgba(255,255,255,0.25); }
   .sync-btns { display: flex; flex-wrap: wrap; gap: 0.5rem; }
-  .sync-btn { background: transparent; border: 1px solid rgba(0,0,0,0.25); border-radius: 8px; padding: 0.5rem 0.9rem; font-size: 0.88rem; font-weight: 600; cursor: pointer; color: inherit; }
+  .sync-btn { background: transparent; border: 1px solid rgba(0,0,0,0.25); border-radius: 8px; padding: 0.5rem 0.9rem; font-size: 0.88rem; font-weight: 600; cursor: pointer; color: inherit; min-height: 44px; }
   .app.dark .sync-btn { border-color: rgba(255,255,255,0.3); }
   .sync-btn.primary { background: #b45309; border-color: #b45309; color: #fff; }
-  .sync-btn.quiet { border-color: transparent; opacity: 0.6; }
+  .sync-btn.quiet { border-color: transparent; color: var(--muted); }
   .sync-btn:disabled { opacity: 0.5; cursor: default; }
   .sync-status { font-size: 0.78rem; opacity: 0.6; margin: 0.7rem 0 0; }
   .sync-status.bad { color: #b91c1c; opacity: 1; }
@@ -1341,10 +1347,10 @@
   .sync-modal-x { position: absolute; top: 0.3rem; right: 0.4rem; width: 2.4rem; height: 2.4rem; background: none; border: none; font-size: 1.7rem; line-height: 1; color: inherit; opacity: 0.55; cursor: pointer; }
   .sync-modal-box { position: relative; background: #fffdf8; color: #2a2418; border-radius: 14px; padding: 1.1rem; max-width: 22rem; width: 100%; font-family: system-ui, sans-serif; }
   .app.dark .sync-modal-box { background: #1e1b14; color: #eee6d4; }
-  .home-nudge { display: flex; align-items: center; gap: 0.3rem; margin-top: 0.35rem; }
-  .home-nudge-go { background: rgba(180, 83, 9, 0.1); border: none; border-radius: 999px; padding: 0.3rem 0.7rem; font-family: system-ui, sans-serif; font-size: 0.76rem; font-weight: 600; color: #b45309; cursor: pointer; }
+  .home-nudge { display: flex; align-items: center; gap: 0.3rem; margin-top: 0.35rem; flex-shrink: 0; }
+  .home-nudge-go { background: rgba(180, 83, 9, 0.1); border: none; border-radius: 999px; padding: 0.3rem 0.7rem; font-family: system-ui, sans-serif; font-size: 0.76rem; font-weight: 600; color: #92400e; cursor: pointer; min-height: 44px; white-space: nowrap; }
   .app.dark .home-nudge-go { color: #f0b45a; background: rgba(240, 180, 90, 0.12); }
-  .home-nudge-x { background: transparent; border: none; font-size: 1.1rem; opacity: 0.4; cursor: pointer; color: inherit; padding: 0 0.3rem; }
+  .home-nudge-x { background: transparent; border: none; font-size: 1.1rem; opacity: 0.6; cursor: pointer; color: inherit; padding: 0; min-width: 44px; min-height: 44px; margin-left: -0.5rem; }
   .stat-row { display: flex; gap: 1rem; }
 
   .stat {
@@ -1357,7 +1363,7 @@
   .app.dark .stat { background: #1e1b14; }
 
   .stat-value { font-size: 1.3rem; font-weight: 700; }
-  .stat-label { font-size: 0.72rem; font-family: system-ui, sans-serif; opacity: 0.5; margin-top: 0.1rem; }
+  .stat-label { font-size: 0.72rem; font-family: system-ui, sans-serif; color: var(--muted); margin-top: 0.1rem; }
 
   .section-label {
     font-family: system-ui, sans-serif;
@@ -1365,7 +1371,7 @@
     font-weight: 700;
     letter-spacing: 0.08em;
     text-transform: uppercase;
-    opacity: 0.4;
+    color: var(--muted);
     margin-top: 0.3rem;
   }
 
@@ -1378,7 +1384,7 @@
     border: none;
     cursor: pointer;
     color: inherit;
-    padding: 0.7rem 0.3rem;
+    width: 100%; min-height: 48px; padding: 0.7rem 0.3rem;
     border-bottom: 1px solid rgba(0,0,0,0.05);
     font-family: inherit;
     text-align: left;
@@ -1389,7 +1395,7 @@
   .app.dark .lang-option { border-color: rgba(255,255,255,0.05); }
 
   .lang-native { flex: 1; font-size: 0.95rem; }
-  .lang-code { font-family: system-ui, sans-serif; font-size: 0.7rem; opacity: 0.4; text-transform: uppercase; }
+  .lang-code { font-family: system-ui, sans-serif; font-size: 0.7rem; color: var(--muted); text-transform: uppercase; }
 
   .appearance-row { display: flex; gap: 0.5rem; }
 
@@ -1405,6 +1411,7 @@
     font-size: 0.85rem;
     font-weight: 500;
     transition: background 0.15s, border-color 0.15s;
+    min-height: 44px;
   }
   .appear-btn.selected {
     background: #b45309;
@@ -1412,12 +1419,12 @@
     border-color: transparent;
   }
   .app.dark .appear-btn { border-color: rgba(255,255,255,0.12); }
-  .app.dark .appear-btn.selected { background: #d97706; }
+  .app.dark .appear-btn.selected { background: #b45309; }
 
   .bookmark-list { display: flex; flex-direction: column; gap: 0; }
   .bookmark-row { display: flex; align-items: center; border-bottom: 1px solid rgba(0,0,0,0.05); }
   .bookmark-row .bookmark-item { flex: 1; min-width: 0; border-bottom: none; }
-  .bm-remove { flex-shrink: 0; width: 2.6rem; height: 2.6rem; display: flex; align-items: center; justify-content: center; background: none; border: none; color: inherit; opacity: 0.4; cursor: pointer; border-radius: 8px; }
+  .bm-remove { flex-shrink: 0; width: 2.75rem; height: 2.75rem; display: flex; align-items: center; justify-content: center; background: none; border: none; color: inherit; opacity: 0.6; cursor: pointer; border-radius: 8px; }
   .bm-remove:active { opacity: 0.9; background: rgba(180, 83, 9, 0.1); }
   .app.dark .bookmark-row { border-bottom-color: rgba(255,255,255,0.07); }
 
@@ -1436,7 +1443,7 @@
   }
   .bm-ref { font-size: 0.72rem; font-weight: 700; color: #b45309; font-family: system-ui, sans-serif; }
   .app.dark .bm-ref { color: #d97706; }
-  .bm-preview { font-size: 0.85rem; opacity: 0.6; }
+  .bm-preview { font-size: 0.85rem; color: var(--muted); }
 
   /* ── TAB BAR ── */
   .tab-bar {
@@ -1458,14 +1465,13 @@
     border: none;
     cursor: pointer;
     color: inherit;
-    opacity: 0.4;
+    color: var(--muted);
     font-family: system-ui, sans-serif;
-    font-size: 0.65rem;
+    font-size: 0.72rem;
     font-weight: 500;
     transition: opacity 0.15s;
   }
   .tab.active {
-    opacity: 1;
     color: #b45309;
   }
   .app.dark .tab.active { color: #d97706; }
@@ -1484,7 +1490,7 @@
   .transliteration {
     font-size: 1.15rem;
     font-style: italic;
-    color: #78716c;
+    color: var(--muted);
     white-space: pre-line;
     line-height: 1.65;
   }
@@ -1505,6 +1511,7 @@
     align-items: center;
     opacity: 0.55;
     transition: opacity 0.15s;
+    min-width: 44px; min-height: 44px; justify-content: center;
   }
   .icon-btn:hover { opacity: 0.9; }
   .icon-btn.bookmarked { opacity: 1; color: #b45309; }
@@ -1519,6 +1526,7 @@
     font-family: system-ui, sans-serif;
     cursor: pointer;
     transition: background 0.15s, opacity 0.15s;
+    min-height: 44px;
   }
 
 
@@ -1536,14 +1544,14 @@
     font-size: 0.9rem;
     font-weight: 600;
     font-family: system-ui, sans-serif;
-    padding: 0.4rem 0;
-    opacity: 0.75;
+    padding: 0 0.5rem; min-height: 44px;
+    
   }
-  .text-btn:hover { opacity: 1; }
+  .text-btn:hover { text-decoration: underline; }
   .app.dark .text-btn { color: #d97706; }
 
-  .home-today-btn { font-size: 0.82rem; opacity: 0.5; }
-  .home-today-btn.active { opacity: 0.25; }
+  .home-today-btn { font-size: 0.82rem;  }
+  .home-today-btn.active { color: var(--muted); font-weight: 500; cursor: default; text-decoration: none; }
 
   .reset-fab {
     position: static;
@@ -1637,7 +1645,6 @@
     font-family: system-ui, sans-serif;
     letter-spacing: 0.03em;
     color: #b45309;
-    opacity: 0.85;
   }
   .app.dark .sheet-title { color: #d97706; }
 
@@ -1673,9 +1680,9 @@
     display: flex;
     flex-direction: column;
     gap: 0.55rem;
-    border-left: 3px solid #b45309;
+    border: 1px solid rgba(180, 83, 9, 0.35);
   }
-  .app.dark .share-card { background: #1e1b14; border-color: #d97706; }
+  .app.dark .share-card { background: #1e1b14; border-color: rgba(217, 119, 6, 0.45); }
 
   .share-devanagari { font-size: 0.85rem; line-height: 1.65; color: #92400e; }
   .app.dark .share-devanagari { color: #d97706; }
