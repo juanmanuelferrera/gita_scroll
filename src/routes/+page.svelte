@@ -2,8 +2,10 @@
   import { onMount } from 'svelte';
   import { base } from '$app/paths';
   import * as SY from '$lib/sync.js';
-  import { LANG_TAG, RTL, NON_LATIN, ui, chapterName } from '$lib/i18n.js';
+  import { LANG_TAG, RTL, NON_LATIN, ui, rich, chapterName } from '$lib/i18n.js';
   import { trapFocus } from '$lib/a11y.js';
+  import Icon from '$lib/Icon.svelte';
+  import { scrollFade } from '$lib/scrollfade.js';
 
   // ── Data ─────────────────────────────────────────────────────────────────
   let verses   = $state([]);
@@ -14,9 +16,13 @@
   let ready    = $state(false);         // true cuando ya se leyeron las preferencias guardadas: hasta entonces los efectos NO deben escribirlas
   // Textos de la interfaz de lectura y atributos de idioma/dirección de los textos del verso
   const T = (k, v) => ui(currentLang, k, v);
+  const nb = (t) => (t || '').replace(/\s+([।॥])/g, '\u00A0$1');                // la dandā no se queda sola en una línea
+  const clip = (t, n = 60) => { t = (t || '').trim(); if (t.length <= n) return t; const c = t.slice(0, n); return c.slice(0, Math.max(c.lastIndexOf(' '), 30)).replace(/[\s,;:.\-–—]+$/, '') + '…'; };   // recorta en palabra entera
   const tag = $derived(LANG_TAG[currentLang] || 'en');
-  const txt = $derived({ lang: LANG_TAG[currentLang] || 'en', dir: RTL.has(currentLang) ? 'rtl' : 'ltr' });
-  const nolatin = $derived(NON_LATIN.has(currentLang));
+  // si ese verso no existe en el idioma elegido, se muestra en inglés: entonces el texto es inglés (lang, dirección y cursiva incluidos)
+  const fallback = $derived(currentLang !== 'en' && !!packs.en && !packs[currentLang]?.[currentIndex]);
+  const txt = $derived(fallback ? { lang: 'en', dir: 'ltr' } : { lang: LANG_TAG[currentLang] || 'en', dir: RTL.has(currentLang) ? 'rtl' : 'ltr' });
+  const nolatin = $derived(!fallback && NON_LATIN.has(currentLang));
   let liveMsg = $state('');                  // región aria-live: anuncia el verso nuevo a los lectores de pantalla
   let lastAnnounced = -1;
   let appEl = $state();                 // contenedor raíz (bind:this)
@@ -185,9 +191,12 @@
   }
 
   // ── Teclado / gestos: el verso cambia en VERTICAL (hacia arriba = siguiente), como en Reels ────────────
+  const sheetOpen = () => showPurport || showHomePurport || showShare || showLangPicker || !!linkPreview;
   function handleKeydown(e) {
     if (e.key === 'Escape' && linkPreview) { linkPreview = null; return; }
     if (activeTab !== 'gita' && activeTab !== 'home') return;
+    // con una hoja abierta las flechas desplazan la hoja, no cambian el verso de debajo; en un selector o campo, son del selector o campo
+    if (e.key !== 'Escape' && (sheetOpen() || /^(SELECT|INPUT|TEXTAREA)$/.test(e.target?.tagName) || e.target?.isContentEditable)) return;
     if (e.key === 'ArrowDown' || e.key === 'PageDown' || e.key === 'ArrowRight') navigate(1);
     else if (e.key === 'ArrowUp' || e.key === 'PageUp' || e.key === 'ArrowLeft') navigate(-1);
     else if (e.key === 'Escape') { showPurport = false; showShare = false; showHomePurport = false; showLangPicker = false; }
@@ -232,7 +241,7 @@
   let lastWheel = 0;
   function handleWheel(e) {
     if (activeTab !== 'gita' && activeTab !== 'home') return;
-    if (Math.abs(e.deltaY) < 30 || Date.now() - lastWheel < 650) return;   // la inercia del trackpad no debe saltar varios versos
+    if (sheetOpen() || Math.abs(e.deltaY) < 30 || Date.now() - lastWheel < 650) return;   // la inercia del trackpad no debe saltar varios versos
     const ed = edges(e.target, appEl);
     if (e.deltaY > 0 && ed.bottom) { lastWheel = Date.now(); navigate(1); }
     else if (e.deltaY < 0 && ed.top) { lastWheel = Date.now(); navigate(-1); }
@@ -289,7 +298,7 @@
       await ensureLang('en');
       if (saved !== 'en') await ensureLang(saved);
     } catch (err) {
-      loadError = 'Could not load the Gita. Please check your connection and reload.';
+      loadError = ui(load('sg_lang', 'en'), 'loadFail');
       return;
     }
 
@@ -371,12 +380,12 @@
         } else { sync = { ...sync, version: r.version }; break; }
       }
       sync = { ...sync, at: Date.now() }; save('sg_sync', JSON.stringify(sync)); syncLast = Date.now(); firstSync = false;
-      if (pulled) syncMsg = 'Updated from your other device.';
+      if (pulled) syncMsg = T('msgUpdated');
     } catch (e) {
-      syncErr = e.code === 'too_large' ? 'Your progress is too big for the cloud copy.'
-        : e.status === 404 ? 'This code no longer exists.'
-        : e.code === 'wrong_app' ? 'This code belongs to another app.'
-        : 'Could not save just now. It will try again.';
+      syncErr = e.code === 'too_large' ? T('errTooBig')
+        : e.status === 404 ? T('errGone')
+        : e.code === 'wrong_app' ? T('errOtherApp')
+        : T('errSave');
       if (e.status !== 404 && e.code !== 'too_large' && e.code !== 'wrong_app') syncSoon(120000);
     } finally { syncBusy = false; }
   }
@@ -385,7 +394,7 @@
     try {
       const r = await SY.sj(SYNC_API, '/new', { method: 'POST', body: JSON.stringify({ data: SY.pack(localState()) }) });
       sync = { code: r.code, version: r.version, at: Date.now() }; save('sg_sync', JSON.stringify(sync)); firstSync = false; setSyncOpen(true);
-    } catch (e) { syncErr = e.code === 'too_large' ? 'Your progress is too big for the cloud copy.' : 'Cloud copy is not available right now.'; }
+    } catch (e) { syncErr = e.code === 'too_large' ? T('errTooBig') : T('errUnavailable'); }
     finally { syncBusy = false; }
   }
   function syncStop() { clearTimeout(syncTimer); sync = null; syncErr = ''; syncMsg = ''; try { localStorage.removeItem('sg_sync'); } catch {} }
@@ -393,29 +402,29 @@
   async function syncLinkCheck() {
     syncErr = ''; syncMsg = '';
     const code = SY.normalizeCode(linkInput);
-    if (!code) { syncErr = 'A code has 8 letters, for example KTMRBXWZ.'; return; }
+    if (!code) { syncErr = T('errCode8'); return; }
     syncBusy = true;
     try {
       const r = await SY.sj(SYNC_API, '/' + code); const remote = SY.unpack(r.data);
       linkPreview = { code, version: r.version, n: SY.summary(remote) };
     } catch (e) {
-      syncErr = e.status === 404 ? 'No copy with that code.' : e.code === 'wrong_app' ? 'That code belongs to another app, not Scroll Gita.'
-        : e.status === 429 ? 'Too many tries. Wait a minute and try again.' : 'Cloud copy is not available right now.';
+      syncErr = e.status === 404 ? T('errNotFound') : e.code === 'wrong_app' ? T('errOtherApp')
+        : e.status === 429 ? T('errTooMany') : T('errUnavailable');
     } finally { syncBusy = false; }
   }
   async function syncLinkConfirm() {
     const lp = linkPreview; linkPreview = null; linkOpen = false; linkInput = '';
     sync = { code: lp.code, version: lp.version, at: 0 }; save('sg_sync', JSON.stringify(sync)); firstSync = true; setSyncOpen(true);
     await syncRun();
-    if (!syncErr) syncMsg = `Linked: ${bookmarks.size} bookmarks, ${readVerses.size} verses read.`;
+    if (!syncErr) syncMsg = T('msgLinked', { b: bookmarks.size, r: readVerses.size });
   }
   async function copyCode() {
-    try { await navigator.clipboard.writeText(sync.code); syncMsg = 'Code copied.'; } catch { syncMsg = 'Select the code and copy it.'; }
+    try { await navigator.clipboard.writeText(sync.code); syncMsg = T('msgCopied'); } catch { syncMsg = T('msgCopyManual'); }
   }
   function syncStatus() {
-    if (syncBusy) return 'Saving…';
+    if (syncBusy) return T('saving');
     if (syncErr) return syncErr;
-    if (sync?.at) return 'Saved at ' + new Date(sync.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    if (sync?.at) return T('savedAt', { time: new Date(sync.at).toLocaleTimeString(tag, { hour: '2-digit', minute: '2-digit' }) });
     return '';
   }
 
@@ -439,7 +448,7 @@
   }
 
   function formatDate() {
-    return new Date().toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'long' });
+    return new Date().toLocaleDateString(tag, { weekday: 'long', day: 'numeric', month: 'long' });
   }
 
   const CHAPTER_NAMES = [
@@ -622,6 +631,7 @@
   class="app"
   class:dark={darkMode}
   lang={tag}
+  dir={RTL.has(currentLang) ? 'rtl' : 'ltr'}
   onwheel={handleWheel}
 >
   <div class="sr-only" aria-live="polite" aria-atomic="true">{liveMsg}</div>
@@ -637,7 +647,7 @@
           <div>
             <div class="home-date">{formatDate()}</div>
             {#if streak > 1}
-              <div class="home-streak">🔥 Day {streak} streak</div>
+              <div class="home-streak"><Icon name="flame" size={15} /> {T('streakDays', { n: streak })}</div>
             {/if}
           </div>
           <div class="home-header-right">
@@ -658,14 +668,15 @@
         <!-- Aviso de la copia en la nube: fila propia (dentro de la columna de la fecha se partía en 2-3 líneas) -->
         {#if !sync && readVerses.size >= 3 && !nudgeHidden}
           <div class="home-nudge">
-            <button class="home-nudge-go" onclick={() => activeTab = 'profile'}>☁ Save your progress in the cloud →</button>
-            <button class="home-nudge-x" aria-label="Hide this" onclick={() => { nudgeHidden = true; save('sg_nudge', '1'); }}>×</button>
+            <button class="home-nudge-go" onclick={() => activeTab = 'profile'}><Icon name="cloud" size={16} /> {T('nudge')}</button>
+            <button class="home-nudge-x" aria-label={T('hideThis')} onclick={() => { nudgeHidden = true; save('sg_nudge', '1'); }}>×</button>
           </div>
         {/if}
 
         <!-- Card -->
         <div
           class="home-card"
+          use:scrollFade
           class:slide-out-up={isAnimating && animDir === 1}
           class:slide-out-down={isAnimating && animDir === -1}
           class:enter-up={enterDir === 1}
@@ -674,11 +685,10 @@
           <div class="home-card-header">
             {#if isToday}
               <span class="today-label">{T('todayVerse')}</span>
-              <span class="today-label-dot">·</span>
             {/if}
-            <span class="home-ref-badge">Bhagavad-gītā {formatRef(verse.ref)}</span>
+            <span class="home-ref-badge" dir="ltr">Bhagavad-gītā {formatRef(verse.ref)}</span>
           </div>
-          <div class="home-devanagari">{verse.devanagari.replace(/\s*॥[०-९\d]+॥\s*$/, '').split('\n').slice(0, 2).join('\n')}</div>
+          <div class="home-devanagari" dir="ltr">{nb(verse.devanagari.replace(/\s*॥[०-९\d]+॥\s*$/, '').split('\n').slice(0, 2).join('\n'))}</div>
           {#if tl.transliteration}
             <div class="home-translit" class:nolatin {...txt}>{tl.transliteration.split('\n').slice(0, 4).join('\n')}</div>
           {/if}
@@ -706,7 +716,7 @@
           </button>
           <button class="text-btn home-today-btn" class:active={isToday} onclick={() => goToVerse(todayIndex())} aria-label={T('goToday')}>{T('today')}</button>
           {#if tl.purport}
-            <button class="text-btn home-purport-btn" onclick={() => showHomePurport = true}>{T('purport')}</button>
+            <button class="pill-btn purport-pill home-purport-btn" onclick={() => showHomePurport = true}>{T('purport')}</button>
           {/if}
         </div>
       {:else}
@@ -767,13 +777,14 @@
       {#if verse}
         <div
           class="verse-content"
+          use:scrollFade
           class:slide-out-up={isAnimating && animDir === 1}
           class:slide-out-down={isAnimating && animDir === -1}
           class:enter-up={enterDir === 1}
           class:enter-down={enterDir === -1}
         >
-          <div class="gita-verse-ref">Bhagavad-gītā {formatRef(verse.ref)}</div>
-          <div class="devanagari centered">{verse.devanagari.replace(/\s*॥[०-९\d]+॥\s*$/, '')}</div>
+          <div class="gita-verse-ref" dir="ltr">Bhagavad-gītā {formatRef(verse.ref)}</div>
+          <div class="devanagari centered" dir="ltr">{nb(verse.devanagari.replace(/\s*॥[०-९\d]+॥\s*$/, ''))}</div>
           {#if langData.transliteration}
             <div class="transliteration centered" class:nolatin {...txt}>{langData.transliteration}</div>
           {/if}
@@ -808,82 +819,80 @@
 
   <!-- ══════════════════ PROFILE TAB ══════════════════ -->
   {#if activeTab === 'profile'}
-    <div class="screen profile-screen" lang="en">
-      <h2 class="profile-title">Profile</h2>
+    <div class="screen profile-screen">
+      <h2 class="profile-title">{T('profile')}</h2>
 
       <div class="stat-row">
         <div class="stat">
-          <div class="stat-value">🔥 {streak}</div>
-          <div class="stat-label">Day streak</div>
+          <div class="stat-value"><span class="flame"><Icon name="flame" size={20} /></span> {streak}</div>
+          <div class="stat-label">{T('statStreak')}</div>
         </div>
         <div class="stat">
           <div class="stat-value">{bookmarks.size}</div>
-          <div class="stat-label">Bookmarks</div>
+          <div class="stat-label">{T('statBookmarks')}</div>
         </div>
         <div class="stat">
           <div class="stat-value">{readVerses.size}</div>
-          <div class="stat-label">Read</div>
+          <div class="stat-label">{T('statRead')}</div>
         </div>
       </div>
 
       {#if canInstall}
-        <div class="section-label">Install the app</div>
+        <div class="section-label">{T('sectionInstall')}</div>
         <div class="sync-card">
           {#if !installOpen}
             <button class="sync-mini" onclick={() => setInstallOpen(true)} aria-expanded="false">
-              <span>Add to your home screen</span>
+              <span>{T('installMini')}</span>
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><polyline points="6 9 12 15 18 9"/></svg>
             </button>
           {:else}
             <button class="sync-close" aria-label="Close" onclick={() => setInstallOpen(false)}>×</button>
-            <p class="sync-text" style="margin-bottom:0.7rem; padding-right:2rem">Add Scroll Gita to your home screen: it opens full screen and works without a connection.</p>
+            <p class="sync-text" style="margin-bottom:0.7rem; padding-inline-end:2rem">{T('installText')}</p>
             {#if installEvt}
-              <div class="sync-btns"><button class="sync-btn primary" onclick={installApp}>Install</button></div>
+              <div class="sync-btns"><button class="sync-btn primary" onclick={installApp}>{T('install')}</button></div>
             {:else}
-              <div class="sync-btns"><button class="sync-btn primary" onclick={() => showIOS = !showIOS} aria-expanded={showIOS}>How to install</button></div>
+              <div class="sync-btns"><button class="sync-btn primary" onclick={() => showIOS = !showIOS} aria-expanded={showIOS}>{T('howInstall')}</button></div>
               {#if showIOS}
-                <p class="sync-text" style="margin:0.7rem 0 0">In Safari, tap <b>Share</b>
-                  <svg class="inline-share" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V3M8 7l4-4 4 4M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/></svg>
-                  at the bottom of the screen, then choose <b>Add to Home Screen</b>.</p>
+                <p class="sync-text" style="margin:0.7rem 0 0">{@html rich(T('iosSteps'))}</p>
               {/if}
             {/if}
           {/if}
         </div>
       {/if}
 
-      <div class="section-label">Save your progress</div>
+      <div class="section-label">{T('sectionSave')}</div>
       <div class="sync-card">
         {#if !sync}
-          <p class="sync-lead">☁ Keep your progress safe</p>
-          <p class="sync-text">Save your bookmarks, your streak and where you stopped in the cloud, and continue on any phone or computer. No account, no email: you just get a short code.</p>
+          <p class="sync-lead"><Icon name="cloud" size={18} /> {T('saveLead')}</p>
+          <p class="sync-text">{T('saveText')}</p>
           {#if !linkOpen}
             <div class="sync-btns">
-              <button class="sync-btn primary" onclick={syncEnable} disabled={syncBusy}>{syncBusy ? 'One moment…' : 'Save my progress'}</button>
-              <button class="sync-btn" onclick={() => { linkOpen = true; syncErr = ''; syncMsg = ''; }}>I already have a code</button>
+              <button class="sync-btn primary" onclick={syncEnable} disabled={syncBusy}>{syncBusy ? T('saving') : T('saveBtn')}</button>
+              <button class="sync-btn" onclick={() => { linkOpen = true; syncErr = ''; syncMsg = ''; }}>{T('haveCode')}</button>
             </div>
           {:else}
-            <p class="sync-text">Type the code you got on your other device.</p>
+            <p class="sync-text">{T('typeCode')}</p>
             <input class="sync-input" bind:value={linkInput} placeholder="KTMRBXWZ" autocapitalize="characters" autocomplete="off" spellcheck="false" maxlength="14"
                    onkeydown={(e) => e.key === 'Enter' && syncLinkCheck()} />
             <div class="sync-btns">
-              <button class="sync-btn primary" onclick={syncLinkCheck} disabled={syncBusy}>Continue</button>
-              <button class="sync-btn" onclick={() => { linkOpen = false; linkInput = ''; syncErr = ''; }}>Cancel</button>
+              <button class="sync-btn primary" onclick={syncLinkCheck} disabled={syncBusy}>{T('continue')}</button>
+              <button class="sync-btn" onclick={() => { linkOpen = false; linkInput = ''; syncErr = ''; }}>{T('cancel')}</button>
             </div>
           {/if}
         {:else if !syncOpen}
           <button class="sync-mini" onclick={() => setSyncOpen(true)} aria-expanded="false">
-            <span>☁ Progress saved · <b class="sync-mini-code">{sync.code}</b></span>
+            <span><Icon name="cloud" size={16} /> {T('savedMini')} · <b class="sync-mini-code" dir="ltr">{sync.code}</b></span>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><polyline points="6 9 12 15 18 9"/></svg>
           </button>
         {:else}
           <button class="sync-close" aria-label="Close" onclick={() => setSyncOpen(false)}>×</button>
-          <p class="sync-lead">☁ Your progress is saved</p>
-          <div class="sync-code" aria-label="Your code">{sync.code}</div>
-          <p class="sync-text">Write this code down. To continue on another device, open Scroll Gita there, go to Profile and choose <b>I already have a code</b>. Anyone with the code can see your bookmarks, so keep it private.</p>
+          <p class="sync-lead"><Icon name="cloud" size={18} /> {T('savedLead')}</p>
+          <div class="sync-code" dir="ltr" aria-label={T('yourCode')}>{sync.code}</div>
+          <p class="sync-text">{@html rich(T('codeHelp'))}</p>
           <div class="sync-btns">
-            <button class="sync-btn" onclick={copyCode}>Copy code</button>
-            <button class="sync-btn" onclick={syncRun} disabled={syncBusy}>Save now</button>
-            <button class="sync-btn quiet" onclick={syncStop}>Stop saving</button>
+            <button class="sync-btn" onclick={copyCode}>{T('copyCode')}</button>
+            <button class="sync-btn" onclick={syncRun} disabled={syncBusy}>{T('saveNow')}</button>
+            <button class="sync-btn quiet" onclick={syncStop}>{T('stopSaving')}</button>
           </div>
         {/if}
         {#if (syncStatus() || syncMsg) && (syncOpen || !sync || syncErr)}
@@ -891,14 +900,14 @@
         {/if}
       </div>
 
-      <div class="section-label">Appearance</div>
+      <div class="section-label">{T('sectionAppearance')}</div>
       <div class="appearance-row">
-        <button class="appear-btn" class:selected={!darkMode} onclick={() => darkMode = false}>Light</button>
-        <button class="appear-btn" class:selected={darkMode} onclick={() => darkMode = true}>Dark</button>
+        <button class="appear-btn" class:selected={!darkMode} onclick={() => darkMode = false}>{T('light')}</button>
+        <button class="appear-btn" class:selected={darkMode} onclick={() => darkMode = true}>{T('dark')}</button>
       </div>
 
       {#if bookmarkList.length}
-        <div class="section-label">Bookmarks</div>
+        <div class="section-label">{T('sectionBookmarks')}</div>
         <div class="bookmark-list">
           {#each bookmarkList as v, i}
             {@const ld = packs[currentLang]?.[v.index] || packs.en?.[v.index] || {}}
@@ -908,9 +917,9 @@
                 onclick={() => { goToVerse(v.index); activeTab = 'home'; }}
               >
                 <span class="bm-ref">BG {formatRef(v.ref)}</span>
-                <span class="bm-preview">{ld.translation?.slice(0, 60)}…</span>
+                <span class="bm-preview" dir="auto">{clip(ld.translation)}</span>
               </button>
-              <button class="bm-remove" aria-label="Remove BG {formatRef(v.ref)} from bookmarks" onclick={() => removeBookmark(v.index)}>
+              <button class="bm-remove" aria-label={T('removeBookmark', { ref: 'BG ' + formatRef(v.ref) })} onclick={() => removeBookmark(v.index)}>
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M18 6L6 18M6 6l12 12"/></svg>
               </button>
             </div>
@@ -921,12 +930,12 @@
       <!-- spacer so last bookmark isn't hidden behind floating button -->
             <!-- Reset: al final del contenido, no flotando encima (en pantallas pequeñas tapaba los botones) -->
     {#if !confirmReset && !linkPreview}
-      <button class="reset-fab" onclick={() => confirmReset = true}>Reset data</button>
+      <button class="reset-fab" onclick={() => confirmReset = true}>{T('resetData')}</button>
     {:else}
       <div class="reset-confirm">
-        <p>This will delete your streak, bookmarks and read history{#if sync}, and also from your cloud copy and your other devices{/if}. Continue?</p>
+        <p>{sync ? T('resetWarnCloud') : T('resetWarn')}</p>
         <div class="reset-confirm-btns">
-          <button class="reset-cancel" onclick={() => confirmReset = false}>Cancel</button>
+          <button class="reset-cancel" onclick={() => confirmReset = false}>{T('cancel')}</button>
           <button class="reset-ok" onclick={() => {
             bookmarks = new Set();
             readVerses = new Set();
@@ -934,7 +943,7 @@
             confirmReset = false;
             ['sg_bookmarks','sg_read','sg_streak','sg_last_visit'].forEach(k => localStorage.removeItem(k));
             bmT = {}; readT = {}; ixT = [0, 0]; resetAt = Date.now(); persistT(); syncSoon(500);
-          }}>Delete all</button>
+          }}>{T('deleteAll')}</button>
         </div>
       </div>
     {/if}
@@ -945,14 +954,14 @@
 
   {#if linkPreview}
     <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-    <div class="sync-modal" role="dialog" aria-modal="true" aria-label="Link to this code?" onclick={(e) => { if (e.target === e.currentTarget) linkPreview = null; }}>
+    <div class="sync-modal" role="dialog" aria-modal="true" aria-label={T('linkTitle', { code: linkPreview.code })} onclick={(e) => { if (e.target === e.currentTarget) linkPreview = null; }}>
       <div class="sync-modal-box">
         <button class="sync-modal-x" aria-label="Close" onclick={() => { linkPreview = null; }}>×</button>
-        <p class="sync-lead">Link to code {linkPreview.code}?</p>
-        <p class="sync-text">This code holds <b>{linkPreview.n.bookmarks}</b> bookmarks and <b>{linkPreview.n.read}</b> verses read. This device has <b>{bookmarks.size}</b> bookmarks and <b>{readVerses.size}</b> read. Linking combines both: nothing is deleted. Is this your code?</p>
+        <p class="sync-lead">{T('linkTitle', { code: linkPreview.code })}</p>
+        <p class="sync-text">{@html rich(T('linkText', { b: linkPreview.n.bookmarks, r: linkPreview.n.read, b2: bookmarks.size, r2: readVerses.size }))}</p>
         <div class="sync-btns">
-          <button class="sync-btn primary" onclick={syncLinkConfirm}>Yes, link</button>
-          <button class="sync-btn" onclick={() => { linkPreview = null; }}>Cancel</button>
+          <button class="sync-btn primary" onclick={syncLinkConfirm}>{T('yesLink')}</button>
+          <button class="sync-btn" onclick={() => { linkPreview = null; }}>{T('cancel')}</button>
         </div>
       </div>
     </div>
@@ -1057,16 +1066,16 @@
         ontouchstart={(e) => e.stopPropagation()}
         ontouchend={(e) => e.stopPropagation()}
         ontouchmove={(e) => e.stopPropagation()}
-        role="dialog" aria-modal="true" tabindex="-1" aria-labelledby="share-title" lang="en" use:trapFocus>
+        role="dialog" aria-modal="true" tabindex="-1" aria-labelledby="share-title" use:trapFocus>
         <div class="sheet-handle"></div>
         <div class="sheet-header">
-          <span class="sheet-title" id="share-title">Share · BG {formatRef(verse.ref)}</span>
+          <span class="sheet-title" id="share-title">{T('shareTitle', { ref: formatRef(verse.ref) })}</span>
           <button class="icon-btn" onclick={() => showShare = false} aria-label={T('close')}>×</button>
         </div>
         <div class="sheet-body share-body">
           <!-- Card preview -->
           <div class="share-card">
-            <div class="share-devanagari" lang="sa">{verse.devanagari}</div>
+            <div class="share-devanagari" lang="sa">{nb(verse.devanagari)}</div>
             {#if langData.transliteration}
               <div class="share-translit" class:nolatin {...txt}>{langData.transliteration}</div>
             {/if}
@@ -1080,23 +1089,23 @@
           <!-- Share actions grid -->
           <div class="share-actions">
             <button class="share-action-btn" onclick={() => shareImage(verse, langData)}>
-              <span class="share-action-icon">🖼️</span>
-              <span>Share image</span>
+              <span class="share-action-icon"><Icon name="image" size={22} /></span>
+              <span>{T('shareImage')}</span>
             </button>
             <button class="share-action-btn" onclick={() => shareText(verse, langData)}>
-              <span class="share-action-icon">📤</span>
-              <span>Share text</span>
+              <span class="share-action-icon"><Icon name="share" size={22} /></span>
+              <span>{T('shareText')}</span>
             </button>
             <button class="share-action-btn" onclick={() => copyVerse(verse, langData)}>
-              <span class="share-action-icon">📋</span>
-              <span>Copy</span>
+              <span class="share-action-icon"><Icon name="copy" size={22} /></span>
+              <span>{T('copy')}</span>
             </button>
             <a class="share-action-btn" href="https://wa.me/?text={encodeURIComponent(verseShareText(verse, langData))}" target="_blank" rel="noopener">
-              <span class="share-action-icon">🟢</span>
+              <span class="share-action-icon"><Icon name="chat" size={22} /></span>
               <span>WhatsApp</span>
             </a>
             <a class="share-action-btn" href="https://t.me/share/url?url=&text={encodeURIComponent(verseShareText(verse, langData))}" target="_blank" rel="noopener">
-              <span class="share-action-icon">✈️</span>
+              <span class="share-action-icon"><Icon name="send" size={22} /></span>
               <span>Telegram</span>
             </a>
           </div>
@@ -1142,7 +1151,7 @@
   }
 
   /* ── HOME ── */
-  .home-screen { padding: 0.75rem 1.1rem 0.3rem; gap: 0.55rem; position: relative; }
+  .home-screen { padding: 0.75rem 1.1rem 0.3rem; gap: 0.55rem; position: relative; max-width: 640px; width: 100%; margin-inline: auto; }
 
   .home-header {
     display: flex;
@@ -1177,8 +1186,7 @@
     display: flex;
     align-items: center;
     gap: 0.4rem;
-    padding-bottom: 0.1rem;
-  }
+    padding-bottom: 0.1rem; flex-wrap: wrap; row-gap: 0.1rem; }
 
   .today-label {
     font-family: system-ui, sans-serif;
@@ -1186,17 +1194,11 @@
     font-weight: 700;
     letter-spacing: 0.08em;
     color: #b45309;
-    text-transform: uppercase;
-  }
+    text-transform: uppercase; white-space: nowrap; }
+  .today-label::after { content: '·'; margin-inline: 0.45rem 0; color: #b45309; }
+  .app.dark .today-label::after { color: #d97706; }
   .app.dark .today-label { color: #d97706; }
 
-  .today-label-dot {
-    font-family: system-ui, sans-serif;
-    font-size: 0.82rem;
-    color: #b45309;
-    opacity: 0.4;
-  }
-  .app.dark .today-label-dot { color: #d97706; }
 
   .home-card {
     background: white;
@@ -1236,9 +1238,8 @@
     font-family: system-ui, sans-serif;
     font-size: 0.82rem;
     font-weight: 600;
-    color: #78716c;
-  }
-  .app.dark .home-ref-badge { background: rgba(255,255,255,0.08); color: #a8a29e; }
+    color: #78716c; white-space: nowrap; }
+  .app.dark .home-ref-badge { color: #a8a29e; }
 
   .home-bar {
     display: flex;
@@ -1247,7 +1248,7 @@
     padding-bottom: 0.2rem;
   }
 
-  .home-purport-btn { margin-left: auto; }
+  .home-purport-btn { margin-inline-start: auto; }
 
   /* ── GITA ── */
   .gita-screen { padding: 0; }
@@ -1262,7 +1263,7 @@
   }
   .app.dark .gita-top { border-color: rgba(255,255,255,0.06); }
 
-  .chapter-select-wrap { flex: 1; min-width: 0; }
+  .chapter-select-wrap { flex: 1; min-width: 0; max-width: 26rem; }
   .verse-select-wrap { flex-shrink: 0; }
 
   .selector {
@@ -1318,7 +1319,7 @@
   .app.dark .lang-pill.active { background: #b45309; }
 
   /* Progress bar */
-  .progress-bar { height: 2px; background: rgba(0,0,0,0.05); flex-shrink: 0; }
+  .progress-bar { height: 3px; background: rgba(0,0,0,0.08); flex-shrink: 0; }
   .app.dark .progress-bar { background: rgba(255,255,255,0.05); }
   .progress-fill { height: 100%; background: #b45309; transition: width 0.3s ease; }
   .app.dark .progress-fill { background: #d97706; }
@@ -1381,7 +1382,7 @@
     flex-shrink: 0;
   }
   .app.dark .gita-bottom { border-color: rgba(255,255,255,0.07); }
-  .gita-bottom .purport-pill { margin-left: auto; }
+  .gita-bottom .purport-pill { margin-inline-start: auto; }
 
   /* ── PROFILE ── */
   .profile-screen { padding: 1.2rem 1.2rem 0.5rem; gap: 1rem; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
@@ -1395,8 +1396,8 @@
 
   /* ── Copia en la nube ───────────────────────────────────────────────── */
   .sync-card { position: relative; background: white; border-radius: 12px; padding: 0.9rem 1rem; font-family: system-ui, sans-serif; }
-  .sync-close { position: absolute; top: 0.35rem; right: 0.4rem; width: 2.4rem; height: 2.4rem; background: none; border: none; font-size: 1.7rem; line-height: 1; color: inherit; opacity: 0.5; cursor: pointer; z-index: 1; }
-  .sync-mini { display: flex; align-items: center; justify-content: space-between; width: 100%; background: none; border: none; color: inherit; font: inherit; font-size: 0.92rem; padding: 0.2rem 0; cursor: pointer; text-align: left; }
+  .sync-close { position: absolute; top: 0.35rem; inset-inline-end: 0.4rem; width: 2.75rem; height: 2.75rem; background: none; border: none; font-size: 1.7rem; line-height: 1; color: inherit; opacity: 0.5; cursor: pointer; z-index: 1; }
+  .sync-mini { display: flex; align-items: center; justify-content: space-between; width: 100%; background: none; border: none; color: inherit; font: inherit; font-size: 0.92rem; padding: 0.2rem 0; cursor: pointer; text-align: start; }
   .sync-mini-code { font-family: ui-monospace, Menlo, monospace; letter-spacing: 0.12em; }
   .app.dark .sync-card { background: #1e1b14; }
   .sync-lead { font-weight: 700; font-size: 1rem; margin: 0 0 0.35rem; }
@@ -1414,13 +1415,24 @@
   .sync-status { font-size: 0.78rem; opacity: 0.6; margin: 0.7rem 0 0; }
   .sync-status.bad { color: #b91c1c; opacity: 1; }
   .sync-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; padding: 1.2rem; z-index: 1000; }
-  .sync-modal-x { position: absolute; top: 0.3rem; right: 0.4rem; width: 2.4rem; height: 2.4rem; background: none; border: none; font-size: 1.7rem; line-height: 1; color: inherit; opacity: 0.55; cursor: pointer; }
+  .sync-modal-x { position: absolute; top: 0.3rem; inset-inline-end: 0.4rem; width: 2.4rem; height: 2.4rem; background: none; border: none; font-size: 1.7rem; line-height: 1; color: inherit; opacity: 0.55; cursor: pointer; }
   .sync-modal-box { position: relative; background: #fffdf8; color: #2a2418; border-radius: 14px; padding: 1.1rem; max-width: 22rem; width: 100%; font-family: system-ui, sans-serif; }
   .app.dark .sync-modal-box { background: #1e1b14; color: #eee6d4; }
-  .home-nudge { display: flex; align-items: center; gap: 0.3rem; margin-top: 0.35rem; flex-shrink: 0; }
-  .home-nudge-go { background: rgba(180, 83, 9, 0.1); border: none; border-radius: 999px; padding: 0.3rem 0.7rem; font-family: system-ui, sans-serif; font-size: 0.76rem; font-weight: 600; color: #92400e; cursor: pointer; min-height: 44px; white-space: nowrap; }
+  .home-nudge { display: flex; align-items: center; gap: 0.3rem; margin-top: 0.35rem; flex-shrink: 0; min-width: 0; }
+  .home-nudge-go { background: rgba(180, 83, 9, 0.1); border: none; border-radius: 999px; padding: 0.3rem 0.7rem; font-family: system-ui, sans-serif; font-size: 0.76rem; font-weight: 600; color: #92400e; cursor: pointer; min-height: 44px; white-space: normal; min-width: 0; max-width: calc(100% - 2.4rem); line-height: 1.25; text-align: start; }
   .app.dark .home-nudge-go { color: #f0b45a; background: rgba(240, 180, 90, 0.12); }
-  .home-nudge-x { background: transparent; border: none; font-size: 1.1rem; opacity: 0.6; cursor: pointer; color: inherit; padding: 0; min-width: 44px; min-height: 44px; margin-left: -0.5rem; }
+  .home-nudge-x { background: transparent; border: none; font-size: 1.1rem; opacity: 0.6; cursor: pointer; color: inherit; padding: 0; min-width: 44px; min-height: 44px; margin-inline-start: -0.5rem; }
+  /* ── Iconos de línea (sustituyen a los emoji) ───────────────────────── */
+  .flame { color: #b45309; }
+  .app.dark .flame { color: #f0b45a; }
+  .home-streak :global(.ico), .sync-lead :global(.ico), .sync-mini :global(.ico), .home-nudge-go :global(.ico) { margin-inline-end: 0.2rem; }
+  .share-action-icon { display: inline-flex; justify-content: center; }
+  /* hay más texto debajo: degradado al pie del contenedor con scroll */
+  .home-card[data-more='1']::after { content: ''; position: sticky; bottom: -1px; flex-shrink: 0; height: 38px; margin-top: -38px; pointer-events: none; background: linear-gradient(to bottom, rgba(255,255,255,0), #fff); }
+  .app.dark .home-card[data-more='1']::after { background: linear-gradient(to bottom, rgba(30,27,20,0), #1e1b14); }
+  .verse-content[data-more='1'] { -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 40px), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 40px), transparent); }
+  .app.dark .progress-bar { background: rgba(255,255,255,0.14); }
+
   /* ── Accesibilidad ─────────────────────────────────────────────────── */
   .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; border: 0; }
   .sr-focusable:focus { position: static; width: auto; height: auto; margin: 0.2rem auto; padding: 0.4rem 0.9rem; overflow: visible; clip: auto; clip-path: none; background: #b45309; color: #fff; border-radius: 999px; font-family: system-ui, sans-serif; font-size: 0.8rem; font-weight: 600; align-self: center; min-height: 44px; display: inline-flex; align-items: center; }
@@ -1475,7 +1487,7 @@
     width: 100%; min-height: 48px; padding: 0.7rem 0.3rem;
     border-bottom: 1px solid rgba(0,0,0,0.05);
     font-family: inherit;
-    text-align: left;
+    text-align: start;
   }
   .lang-option:hover { background: rgba(0,0,0,0.02); }
   .lang-option.selected { color: #b45309; }
@@ -1501,13 +1513,9 @@
     transition: background 0.15s, border-color 0.15s;
     min-height: 44px;
   }
-  .appear-btn.selected {
-    background: #b45309;
-    color: white;
-    border-color: transparent;
-  }
+  .appear-btn.selected { background: rgba(180, 83, 9, 0.12); color: #92400e; border-color: #b45309; font-weight: 600; }
   .app.dark .appear-btn { border-color: rgba(255,255,255,0.12); }
-  .app.dark .appear-btn.selected { background: #b45309; }
+  .app.dark .appear-btn.selected { background: rgba(240, 180, 90, 0.14); color: #f0b45a; border-color: #d97706; }
 
   .bookmark-list { display: flex; flex-direction: column; gap: 0; }
   .bookmark-row { display: flex; align-items: center; border-bottom: 1px solid rgba(0,0,0,0.05); }
@@ -1520,7 +1528,7 @@
     display: flex;
     flex-direction: column;
     gap: 0.2rem;
-    text-align: left;
+    text-align: start;
     background: none;
     border: none;
     cursor: pointer;
@@ -1638,8 +1646,9 @@
   .text-btn:hover { text-decoration: underline; }
   .app.dark .text-btn { color: #d97706; }
 
-  .home-today-btn { font-size: 0.82rem;  }
+  .home-today-btn { font-size: 0.82rem; min-width: 44px; }
   .home-today-btn.active { color: var(--muted); font-weight: 500; cursor: default; text-decoration: none; }
+  .app.dark .home-today-btn.active { color: var(--muted); font-weight: 500; cursor: default; text-decoration: none; }   /* en oscuro ganaba el naranja de .text-btn */
 
   .reset-fab {
     position: static;
@@ -1738,13 +1747,12 @@
 
   .sheet-body {
     overflow-y: auto;
-    padding: 0.5rem 1.2rem 2rem;
+    padding: 0.6rem 1.4rem 2.2rem;
     flex: 1;
   }
 
   .purport-text {
-    font-size: 0.95rem;
-    line-height: 1.8;
+    font-size: 1.12rem; line-height: 1.75; max-width: 34em; margin: 0 auto;
     white-space: pre-line;
   }
 

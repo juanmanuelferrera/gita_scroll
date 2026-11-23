@@ -3,6 +3,7 @@
 // Los nombres de capítulo salen de los nombres establecidos de vedabase.cc (src/lib/chapter-names.json).
 // ⚠ Los textos de la interfaz de aquí abajo son traducciones breves hechas sin revisión de un lector nativo.
 import CHAPTERS from './chapter-names.json' with { type: 'json' };
+import EXTRA from './ui-extra.json' with { type: 'json' };      // resto de textos (Profile, copia en la nube, instalar, compartir): inglés + 9 idiomas
 
 export const LANG_TAG = { en: 'en', es: 'es', pt: 'pt', hi: 'hi', bn: 'bn', zh: 'zh', bul: 'bg', fr: 'fr', ru: 'ru', ar: 'ar' };
 export const RTL = new Set(['ar']);
@@ -56,6 +57,17 @@ const L = {
     nextVerse: 'الآية التالية', prevVerse: 'الآية السابقة', changeLanguage: 'تغيير اللغة', toggleTheme: 'تبديل السمة', selectChapter: 'اختر الفصل',
     selectVerse: 'اختر الآية', selectLanguage: 'اختر اللغة', close: 'إغلاق', goToday: 'الانتقال إلى آية اليوم', shareVerse: 'مشاركة الآية', progress: 'تقدم القراءة' },
 };
+
+// Los textos de EXTRA se suman a los de lectura de arriba (inglés primero, para que siempre haya texto)
+Object.assign(EN, EXTRA.en || {});
+for (const k of Object.keys(L)) if (k !== 'en') L[k] = { ...L[k], ...(EXTRA[k] || {}) };
+
+const SHARE_ICON = '<svg class="inline-share" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V3M8 7l4-4 4 4M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/></svg>';
+/** HTML seguro a partir de un texto: se escapa todo y solo se admiten **negrita** y [share] (el icono de compartir de iOS). */
+export function rich(text) {
+  return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/\[share\]/g, SHARE_ICON);
+}
 
 /** Texto de la interfaz en `lang`; si falta la clave, inglés. `vars` rellena {n}. */
 export function ui(lang, key, vars) {

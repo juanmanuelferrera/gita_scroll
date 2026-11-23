@@ -72,19 +72,22 @@ python3 -I scripts/icon/make_icons.py                    # writes static/icons/*
 
 ## Languages and accessibility
 
-**Languages.** The text is shown in 10 languages. The reading screens (Home, Gita, the language and purport sheets) are translated into each of the 9 non-English languages: tab labels, "today's verse", Today, Purport, the swipe hint, the chapter and verse pickers and the labels read aloud by screen readers. Chapter names are the established ones from vedabase.cc (`scripts/chapter_names.py` copies them into `src/lib/chapter-names.json`). **Profile** (cloud copy, install, reset) and the share sheet stay in English and are marked `lang="en"`.
+**Languages.** The text is shown in 10 languages and **the whole interface is translated** into each of the 9 non-English ones: reading screens, Profile (install, cloud copy, appearance, bookmarks, reset), the link-to-code dialog, the share sheet, status and error messages, the date (formatted for the language) and the labels read aloud by screen readers. Chapter names are the established ones from vedabase.cc (`scripts/chapter_names.py` copies them into `src/lib/chapter-names.json`).
 
-- The interface strings live in [`src/lib/i18n.js`](src/lib/i18n.js). A missing key falls back to English. **They were written by machine and have not been reviewed by native readers.**
-- Every block of verse text carries its own `lang`, and `<html lang>` follows the chosen language, so screen readers pick the right voice.
-- **Arabic** is laid out right to left (`dir="rtl"`, right-aligned). Transliteration in Hindi, Bengali, Chinese and Arabic is not italicised, because those scripts have no italics.
+- The strings live in [`src/lib/i18n.js`](src/lib/i18n.js) (reading screens) and [`src/lib/ui-extra.json`](src/lib/ui-extra.json) (everything else, 58 strings × 10 languages). A missing key falls back to English. Sentences that need bold or the iOS share icon use `**bold**` and `[share]`; they are escaped and turned into HTML by `rich()`.
+- **The translations were written by machine and have not been reviewed by native readers.** Known doubts: the iOS menu labels in Portuguese (Brazilian ones used), Bulgarian and Bengali; the length of "Bookmarks" in Arabic.
+- **Arabic is mirrored**: `dir="rtl"` on the app, so the tab bar, header, cards and buttons flip (positions use logical properties). Verse references, Sanskrit and the sync code stay left-to-right.
+- Every block of verse text carries its own `lang` and `dir`, and `<html lang>` follows the chosen language, so screen readers pick the right voice. When a verse does not exist in the chosen language and is shown in English, that text is marked `lang="en"` and left-to-right.
+- Transliteration in Hindi, Bengali, Chinese and Arabic is not italicised, because those scripts have no italics.
 - The Arabic data had a stray "." as the first line of 626 transliterations; `scripts/split_langs.py` removes it when it builds the language files.
 
 **Accessibility.**
 
-- Every control is at least 44×44 px and all text meets 4.5:1 contrast in the light and dark themes (checked with Impeccable's detector in 10 screens and states at 390 and 320 px).
+- Every control is at least 44×44 px and all text meets 4.5:1 contrast in the light and dark themes (checked with Impeccable's detector in 10 screens and states at 390 and 320 px, in English, Arabic, Hindi, Russian and Chinese; touch targets also in Bengali and French).
+- With a sheet or dialog open, or the focus in a selector, the arrow and Page keys and the mouse wheel do not change the verse underneath.
 - Real landmarks and states: a named `nav`, `aria-current` on the active tab, `aria-pressed` on the bookmark and theme buttons, a labelled progress bar with its value, and no `role="application"`.
 - The language, purport and share sheets are modal dialogs: focus moves inside, stays inside with Tab and Shift+Tab, Esc closes them, and focus returns to the button that opened them ([`src/lib/a11y.js`](src/lib/a11y.js)).
-- A new verse is announced through a polite live region, and a "Previous verse" button is available to keyboard and screen-reader users (the swipe-down gesture has no equivalent for them). Arrow keys, Page Up and Page Down also change verse.
+- A new verse is announced through a polite live region, and a "Previous verse" button is available to keyboard and screen-reader users (the swipe-down gesture has no equivalent for them). Arrow keys, Page Up and Page Down also change verse (not while a sheet is open).
 - Visible keyboard focus ring in the app's ochre; the chevron bobs three times and stops; with `prefers-reduced-motion` all animations are off.
 - **Not tested yet:** a real screen reader (VoiceOver, TalkBack, NVDA), 200 % zoom, Windows high-contrast mode.
 
@@ -146,7 +149,10 @@ python3 -I scripts/chapter_names.py # → src/lib/chapter-names.json (chapter na
 src/routes/+page.svelte   the whole app (Home, Gita, Profile)
 src/lib/sync.js           cloud copy: merge, pack, server client (pure, no DOM)
 src/app.html              page shell (noindex, PWA tags)
-src/lib/i18n.js           interface strings, language tags, chapter names
+src/lib/i18n.js           reading-screen strings, language tags, chapter names, rich()
+src/lib/ui-extra.json     the rest of the interface strings, 10 languages
+src/lib/Icon.svelte       line icons (no emoji)
+src/lib/scrollfade.js     fade at the bottom of a card with more text below
 src/lib/a11y.js           focus trap for dialogs
 src/service-worker.js     offline support (PWA)
 static/manifest.webmanifest, static/icons/   PWA manifest and icons
