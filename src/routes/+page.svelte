@@ -144,6 +144,11 @@
 
 
   // ── Actions ───────────────────────────────────────────────────────────────
+  function removeBookmark(idx) {
+    const s = new Set(bookmarks); s.delete(idx); bookmarks = s;
+    save('sg_bookmarks', JSON.stringify([...s]));
+    bmT[idx] = [Date.now(), 0]; persistT(); syncSoon(3000);       // queda constancia del cambio para que se quite también en los otros dispositivos
+  }
   function toggleBookmark() {
     const s = new Set(bookmarks);
     if (s.has(currentIndex)) s.delete(currentIndex); else s.add(currentIndex);
@@ -815,13 +820,18 @@
         <div class="bookmark-list">
           {#each bookmarkList as v, i}
             {@const ld = packs[currentLang]?.[v.index] || packs.en?.[v.index] || {}}
-            <button
-              class="bookmark-item"
-              onclick={() => { goToVerse([...bookmarks][i]); activeTab = 'home'; }}
-            >
-              <span class="bm-ref">BG {formatRef(v.ref)}</span>
-              <span class="bm-preview">{ld.translation?.slice(0, 60)}…</span>
-            </button>
+            <div class="bookmark-row">
+              <button
+                class="bookmark-item"
+                onclick={() => { goToVerse(v.index); activeTab = 'home'; }}
+              >
+                <span class="bm-ref">BG {formatRef(v.ref)}</span>
+                <span class="bm-preview">{ld.translation?.slice(0, 60)}…</span>
+              </button>
+              <button class="bm-remove" aria-label="Remove BG {formatRef(v.ref)} from bookmarks" onclick={() => removeBookmark(v.index)}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+              </button>
+            </div>
           {/each}
         </div>
       {/if}
@@ -1288,7 +1298,7 @@
   .gita-bottom .purport-pill { margin-left: auto; }
 
   /* ── PROFILE ── */
-  .profile-screen { padding: 1.2rem 1.2rem 0.5rem; gap: 1rem; }
+  .profile-screen { padding: 1.2rem 1.2rem 0.5rem; gap: 1rem; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
 
   .profile-title {
     font-size: 1.1rem;
@@ -1391,6 +1401,11 @@
   .app.dark .appear-btn.selected { background: #d97706; }
 
   .bookmark-list { display: flex; flex-direction: column; gap: 0; }
+  .bookmark-row { display: flex; align-items: center; border-bottom: 1px solid rgba(0,0,0,0.05); }
+  .bookmark-row .bookmark-item { flex: 1; min-width: 0; border-bottom: none; }
+  .bm-remove { flex-shrink: 0; width: 2.6rem; height: 2.6rem; display: flex; align-items: center; justify-content: center; background: none; border: none; color: inherit; opacity: 0.4; cursor: pointer; border-radius: 8px; }
+  .bm-remove:active { opacity: 0.9; background: rgba(180, 83, 9, 0.1); }
+  .app.dark .bookmark-row { border-bottom-color: rgba(255,255,255,0.07); }
 
   .bookmark-item {
     display: flex;
