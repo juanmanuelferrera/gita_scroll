@@ -83,10 +83,30 @@
 
 
   // ── Navigation ────────────────────────────────────────────────────────────
+  // Home = descubrimiento: hacia arriba sale un verso AL AZAR (prefiere los no leídos y no repite los últimos) y hacia abajo se vuelve atrás
+  // por los que ya salieron. La pestaña Gita sigue siendo lectura en orden (verso a verso, capítulo a capítulo).
+  let homeHist = [], homePos = -1;
+  function pickRandom() {
+    const recent = new Set(homeHist.slice(-40));
+    const pool = [];
+    for (let i = 0; i < total; i++) if (verses[i].chapter >= 1 && !recent.has(i)) pool.push(i);
+    const unread = pool.filter((i) => !readVerses.has(i));
+    const from = unread.length ? unread : pool;
+    return from.length ? from[Math.floor(Math.random() * from.length)] : currentIndex;
+  }
+  function resetHomeHist(i) { homeHist = [i]; homePos = 0; }
+
   function navigate(dir) {
     if (isAnimating) return;
-    const next = currentIndex + dir;
-    if (next < 0 || next >= total) return;
+    const random = activeTab === 'home';
+    let next;
+    if (random) {
+      if (dir < 0) { if (homePos <= 0) return; next = homeHist[homePos - 1]; }
+      else next = homePos < homeHist.length - 1 ? homeHist[homePos + 1] : pickRandom();
+    } else {
+      next = currentIndex + dir;
+      if (next < 0 || next >= total) return;
+    }
     // Mark current verse as read
     const s = new Set(readVerses);
     s.add(currentIndex);
@@ -98,18 +118,25 @@
     if (!hintSeen) { hintSeen = true; save('sg_hint', '1'); }
     setTimeout(() => {
       currentIndex = next;
+      if (random) {
+        if (dir < 0) homePos--;
+        else { if (homePos === homeHist.length - 1) homeHist = [...homeHist.slice(-199), next]; homePos = homeHist.length - 1; }
+      }
       showPurport = false;
       isAnimating = false;
       animDir = 0;
       enterDir = dir; setTimeout(() => { enterDir = 0; }, 280);
       appEl?.querySelectorAll('.home-card, .verse-content').forEach((el) => { el.scrollTop = 0; });
-      save('sg_index', String(currentIndex));
-      ixT = [currentIndex, Date.now()]; persistT(); syncSoon(6000);
+      if (!random) {                                   // la posición de lectura (Gita) no se pisa con el paseo al azar de Home
+        save('sg_index', String(currentIndex));
+        ixT = [currentIndex, Date.now()]; persistT(); syncSoon(6000);
+      }
     }, 200);
   }
 
   function goToVerse(index) {
     currentIndex = index;
+    resetHomeHist(index);
     showPurport = false;
     save('sg_index', String(index));
     ixT = [index, Date.now()]; persistT(); syncSoon(6000);
@@ -127,6 +154,7 @@
 
   // ── Teclado / gestos: el verso cambia en VERTICAL (hacia arriba = siguiente), como en Reels ────────────
   function handleKeydown(e) {
+    if (e.key === 'Escape' && linkPreview) { linkPreview = null; return; }
     if (activeTab !== 'gita' && activeTab !== 'home') return;
     if (e.key === 'ArrowDown' || e.key === 'PageDown' || e.key === 'ArrowRight') navigate(1);
     else if (e.key === 'ArrowUp' || e.key === 'PageUp' || e.key === 'ArrowLeft') navigate(-1);
@@ -236,6 +264,7 @@
     const savedIdx = load('sg_index');           // primera visita: nada guardado → ya se abre el verso de hoy, sin tener que pulsar «Today»
     const idx = savedIdx === '' ? -1 : parseInt(savedIdx);
     currentIndex = idx >= 0 && idx < total ? idx : pickToday(new Set());
+    resetHomeHist(currentIndex);
     currentLang  = load('sg_lang', 'en');
     darkMode     = load('sg_dark') === '1';
     const bm = load('sg_bookmarks');
@@ -604,7 +633,7 @@
         </div>
 
         <!-- Pista de gesto: asoma la tarjeta siguiente y un chevron que rebota -->
-        {#if currentIndex < total - 1}
+        {#if true}
           <div class="peek" aria-hidden="true"></div>
           <button class="swipe-cue" onclick={() => navigate(1)} aria-label="Next verse">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><polyline points="18 15 12 9 6 15"/></svg>
@@ -775,19 +804,6 @@
         {/if}
       </div>
 
-      {#if linkPreview}
-        <div class="sync-modal" role="dialog" aria-label="Link to this code?">
-          <div class="sync-modal-box">
-            <p class="sync-lead">Link to code {linkPreview.code}?</p>
-            <p class="sync-text">This code holds <b>{linkPreview.n.bookmarks}</b> bookmarks and <b>{linkPreview.n.read}</b> verses read. This device has <b>{bookmarks.size}</b> bookmarks and <b>{readVerses.size}</b> read. Linking combines both: nothing is deleted. Is this your code?</p>
-            <div class="sync-btns">
-              <button class="sync-btn primary" onclick={syncLinkConfirm}>Yes, link</button>
-              <button class="sync-btn" onclick={() => { linkPreview = null; }}>Cancel</button>
-            </div>
-          </div>
-        </div>
-      {/if}
-
       <div class="section-label">Appearance</div>
       <div class="appearance-row">
         <button class="appear-btn" class:selected={!darkMode} onclick={() => darkMode = false}>Light</button>
@@ -811,11 +827,8 @@
       {/if}
 
       <!-- spacer so last bookmark isn't hidden behind floating button -->
-      <div style="height:4rem"></div>
-    </div>
-
-    <!-- Floating reset button -->
-    {#if !confirmReset}
+            <!-- Reset: al final del contenido, no flotando encima (en pantallas pequeñas tapaba los botones) -->
+    {#if !confirmReset && !linkPreview}
       <button class="reset-fab" onclick={() => confirmReset = true}>Reset data</button>
     {:else}
       <div class="reset-confirm">
@@ -833,6 +846,24 @@
         </div>
       </div>
     {/if}
+      <div style="height:1.5rem"></div>
+    </div>
+
+  {/if}
+
+  {#if linkPreview}
+    <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+    <div class="sync-modal" role="dialog" aria-modal="true" aria-label="Link to this code?" onclick={(e) => { if (e.target === e.currentTarget) linkPreview = null; }}>
+      <div class="sync-modal-box">
+        <button class="sync-modal-x" aria-label="Close" onclick={() => { linkPreview = null; }}>×</button>
+        <p class="sync-lead">Link to code {linkPreview.code}?</p>
+        <p class="sync-text">This code holds <b>{linkPreview.n.bookmarks}</b> bookmarks and <b>{linkPreview.n.read}</b> verses read. This device has <b>{bookmarks.size}</b> bookmarks and <b>{readVerses.size}</b> read. Linking combines both: nothing is deleted. Is this your code?</p>
+        <div class="sync-btns">
+          <button class="sync-btn primary" onclick={syncLinkConfirm}>Yes, link</button>
+          <button class="sync-btn" onclick={() => { linkPreview = null; }}>Cancel</button>
+        </div>
+      </div>
+    </div>
   {/if}
 
   <!-- ══════════════════ TAB BAR ══════════════════ -->
@@ -1282,8 +1313,9 @@
   .sync-btn:disabled { opacity: 0.5; cursor: default; }
   .sync-status { font-size: 0.78rem; opacity: 0.6; margin: 0.7rem 0 0; }
   .sync-status.bad { color: #b91c1c; opacity: 1; }
-  .sync-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.45); display: flex; align-items: center; justify-content: center; padding: 1.2rem; z-index: 60; }
-  .sync-modal-box { background: #fffdf8; color: #2a2418; border-radius: 14px; padding: 1.1rem; max-width: 22rem; width: 100%; font-family: system-ui, sans-serif; }
+  .sync-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; padding: 1.2rem; z-index: 1000; }
+  .sync-modal-x { position: absolute; top: 0.3rem; right: 0.4rem; width: 2.4rem; height: 2.4rem; background: none; border: none; font-size: 1.7rem; line-height: 1; color: inherit; opacity: 0.55; cursor: pointer; }
+  .sync-modal-box { position: relative; background: #fffdf8; color: #2a2418; border-radius: 14px; padding: 1.1rem; max-width: 22rem; width: 100%; font-family: system-ui, sans-serif; }
   .app.dark .sync-modal-box { background: #1e1b14; color: #eee6d4; }
   .home-nudge { display: flex; align-items: center; gap: 0.3rem; margin-top: 0.35rem; }
   .home-nudge-go { background: rgba(180, 83, 9, 0.1); border: none; border-radius: 999px; padding: 0.3rem 0.7rem; font-family: system-ui, sans-serif; font-size: 0.76rem; font-weight: 600; color: #b45309; cursor: pointer; }
@@ -1485,10 +1517,9 @@
   .home-today-btn.active { opacity: 0.25; }
 
   .reset-fab {
-    position: fixed;
-    bottom: calc(60px + 1rem);
-    left: 1rem;
-    right: 1rem;
+    position: static;
+    width: 100%;
+    margin-top: 0.8rem;
     background: rgba(255,255,255,0.95);
     border: 1px solid rgba(180,83,9,0.3);
     border-radius: 12px;
@@ -1502,10 +1533,8 @@
   .app.dark .reset-fab { background: rgba(30,27,20,0.95); color: #d97706; border-color: rgba(217,119,6,0.3); }
 
   .reset-confirm {
-    position: fixed;
-    bottom: calc(60px + 0.75rem);
-    left: 1rem;
-    right: 1rem;
+    position: static;
+    margin-top: 0.8rem;
     background: #fff;
     border: 1px solid rgba(180,83,9,0.2);
     border-radius: 14px;
