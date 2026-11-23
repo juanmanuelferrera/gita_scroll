@@ -1,7 +1,7 @@
 # Scroll Gita
 
-Estado: app funcionando en Safari iPhone 12 mini (192.168.1.162:1420); layout Home validado visualmente.
-Siguiente: commit inicial del repo; init Android (`npm run tauri android init`); probar share image en iOS.
+Estado: app en producción en vedabase.cc/scrollgita (23-nov). Copia en la nube añadida (Profile): mismo servidor y código de 8 consonantes que Easy Study (`/api/study`), lógica en `src/lib/sync.js` (8 tests: `node --test test/sync.test.mjs`; prueba con el servidor real: `node test/e2e-two-devices.mjs`, crea 1 copia).
+Siguiente: desplegar la versión con copia en la nube (compilar con `BASE_PATH=/scrollgita npm run build`, copiar a `astro_vedabase/public/scrollgita/` sin los JSON grandes, desplegar con `ship`); Android (`npm run tauri android init`).
 
 ## Stack
 - Tauri v2 + SvelteKit + Svelte 5 runes

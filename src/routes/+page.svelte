@@ -1,6 +1,7 @@
 <script>
   import { onMount } from 'svelte';
   import { base } from '$app/paths';
+  import * as SY from '$lib/sync.js';
 
   // ── Data ─────────────────────────────────────────────────────────────────
   let verses   = $state([]);
@@ -9,6 +10,19 @@
   let packs    = $state({});          // código de idioma → { índice: textos }
   let loadingLang = $state(false);
   let appEl = $state();                 // contenedor raíz (bind:this)
+
+  // ── Copia en la nube (mismo servidor y código que Easy Study) ─────────────
+  let bmT = {}, readT = {}, ixT = [0, 0], resetAt = 0;   // marcas de tiempo de cada cambio, para poder mezclar dos dispositivos
+  let sync     = $state(null);         // { code, version, at } cuando está activada
+  let syncBusy = $state(false);
+  let syncErr  = $state('');
+  let syncMsg  = $state('');
+  let linkOpen = $state(false);
+  let linkInput = $state('');
+  let linkPreview = $state(null);      // { code, version, remote, n:{bookmarks,read,streak} }
+  let nudgeHidden = $state(false);
+  let syncTimer = null, applying = false, syncLast = 0, firstSync = true;
+  const SYNC_API = typeof location !== 'undefined' ? SY.apiBase(location.hostname) : '/api/study';
 
   // ── Reader state ──────────────────────────────────────────────────────────
   let currentIndex  = $state(0);
@@ -73,6 +87,7 @@
     s.add(currentIndex);
     readVerses = s;
     save('sg_read', JSON.stringify([...s]));
+    readT[currentIndex] = Date.now(); persistT(); syncSoon(6000);
     animDir = dir;
     isAnimating = true;
     setTimeout(() => {
@@ -81,6 +96,7 @@
       isAnimating = false;
       animDir = 0;
       save('sg_index', String(currentIndex));
+      ixT = [currentIndex, Date.now()]; persistT(); syncSoon(6000);
     }, 200);
   }
 
@@ -88,6 +104,7 @@
     currentIndex = index;
     showPurport = false;
     save('sg_index', String(index));
+    ixT = [index, Date.now()]; persistT(); syncSoon(6000);
   }
 
 
@@ -97,6 +114,7 @@
     if (s.has(currentIndex)) s.delete(currentIndex); else s.add(currentIndex);
     bookmarks = s;
     save('sg_bookmarks', JSON.stringify([...s]));
+    bmT[currentIndex] = [Date.now(), s.has(currentIndex) ? 1 : 0]; persistT(); syncSoon(3000);
   }
 
   // ── Keyboard / touch ──────────────────────────────────────────────────────
@@ -203,7 +221,111 @@
     const rd = load('sg_read');
     if (rd) readVerses = new Set(JSON.parse(rd));
     updateStreak();
+    loadT();
+    nudgeHidden = load('sg_nudge') === '1';
+    if (sync) syncRun();
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && sync && Date.now() - syncLast > 60000) syncSoon(500);
+    });
   });
+
+  // ── Copia en la nube: guardar, mezclar, enlazar ────────────────────────────
+  function persistT() {
+    save('sg_bm_t', JSON.stringify(bmT)); save('sg_read_t', JSON.stringify(readT));
+    save('sg_ix_t', JSON.stringify(ixT)); save('sg_reset_at', String(resetAt));
+  }
+  function loadT() {
+    const j = (k, d) => { try { return JSON.parse(load(k) || 'null') ?? d; } catch { return d; } };
+    bmT = j('sg_bm_t', {}); readT = j('sg_read_t', {}); ixT = j('sg_ix_t', [0, 0]); resetAt = parseInt(load('sg_reset_at', '0')) || 0;
+    // lo guardado antes de existir la copia en la nube no tiene hora: cuenta como «antiguo» (1)
+    for (const i of bookmarks) if (!bmT[i]) bmT[i] = [1, 1];
+    for (const i of readVerses) if (!readT[i]) readT[i] = 1;
+    if (!ixT[1]) ixT = [currentIndex, 1];
+    const sv = j('sg_sync', null); if (sv && SY.normalizeCode(sv.code)) sync = sv;
+  }
+  const localState = () => ({ app: SY.APP, bm: bmT, read: readT, ix: ixT, resetAt,
+    streak: { n: streak, last: load('sg_last_visit') } });
+  function applyMerged(m, adoptPlace) {
+    applying = true;
+    bmT = m.bm; readT = m.read; resetAt = m.resetAt;
+    bookmarks  = new Set(Object.entries(m.bm).filter(([, v]) => v[1]).map(([k]) => +k));
+    readVerses = new Set(Object.keys(m.read).map(Number));
+    save('sg_bookmarks', JSON.stringify([...bookmarks])); save('sg_read', JSON.stringify([...readVerses]));
+    if (m.streak.last && m.streak.last >= load('sg_last_visit')) { streak = m.streak.n; save('sg_streak', String(streak)); save('sg_last_visit', m.streak.last); }
+    if (adoptPlace && m.ix[1] > ixT[1] && m.ix[0] < total) { currentIndex = m.ix[0]; save('sg_index', String(currentIndex)); }
+    if (m.ix[1] > ixT[1]) ixT = m.ix;
+    persistT(); applying = false;
+  }
+  function syncSoon(ms) {
+    if (!sync || applying) return;
+    clearTimeout(syncTimer); syncTimer = setTimeout(syncRun, ms);
+  }
+  // Baja la copia, la mezcla con la de este dispositivo y sube lo que falte. Si otro dispositivo guardó entre medias (409), repite.
+  async function syncRun() {
+    clearTimeout(syncTimer);
+    if (!sync || syncBusy) return;
+    syncBusy = true; syncErr = '';
+    try {
+      let pulled = false;
+      for (let i = 0; i < 3; i++) {
+        const r = await SY.sj(SYNC_API, '/' + sync.code), remote = SY.unpack(r.data), local = localState();
+        const m = SY.merge(local, remote);
+        if (SY.behind(local, m)) { applyMerged(m, firstSync); pulled = true; }
+        if (SY.behind(remote, m)) {
+          try {
+            const w = await SY.sj(SYNC_API, '/' + sync.code, { method: 'PUT', body: JSON.stringify({ data: SY.pack(localState()), base_version: r.version }) });
+            sync = { ...sync, version: w.version }; break;
+          } catch (e) { if (e.status === 409 && i < 2) continue; throw e; }
+        } else { sync = { ...sync, version: r.version }; break; }
+      }
+      sync = { ...sync, at: Date.now() }; save('sg_sync', JSON.stringify(sync)); syncLast = Date.now(); firstSync = false;
+      if (pulled) syncMsg = 'Updated from your other device.';
+    } catch (e) {
+      syncErr = e.code === 'too_large' ? 'Your progress is too big for the cloud copy.'
+        : e.status === 404 ? 'This code no longer exists.'
+        : e.code === 'wrong_app' ? 'This code belongs to another app.'
+        : 'Could not save just now. It will try again.';
+      if (e.status !== 404 && e.code !== 'too_large' && e.code !== 'wrong_app') syncSoon(120000);
+    } finally { syncBusy = false; }
+  }
+  async function syncEnable() {
+    syncErr = ''; syncMsg = ''; syncBusy = true;
+    try {
+      const r = await SY.sj(SYNC_API, '/new', { method: 'POST', body: JSON.stringify({ data: SY.pack(localState()) }) });
+      sync = { code: r.code, version: r.version, at: Date.now() }; save('sg_sync', JSON.stringify(sync)); firstSync = false;
+    } catch (e) { syncErr = e.code === 'too_large' ? 'Your progress is too big for the cloud copy.' : 'Cloud copy is not available right now.'; }
+    finally { syncBusy = false; }
+  }
+  function syncStop() { clearTimeout(syncTimer); sync = null; syncErr = ''; syncMsg = ''; try { localStorage.removeItem('sg_sync'); } catch {} }
+  // Enlazar pregunta antes, con números, para que un error al teclear no mezcle el progreso de otra persona con el tuyo.
+  async function syncLinkCheck() {
+    syncErr = ''; syncMsg = '';
+    const code = SY.normalizeCode(linkInput);
+    if (!code) { syncErr = 'A code has 8 letters, for example KTMRBXWZ.'; return; }
+    syncBusy = true;
+    try {
+      const r = await SY.sj(SYNC_API, '/' + code); const remote = SY.unpack(r.data);
+      linkPreview = { code, version: r.version, n: SY.summary(remote) };
+    } catch (e) {
+      syncErr = e.status === 404 ? 'No copy with that code.' : e.code === 'wrong_app' ? 'That code belongs to another app, not Scroll Gita.'
+        : e.status === 429 ? 'Too many tries. Wait a minute and try again.' : 'Cloud copy is not available right now.';
+    } finally { syncBusy = false; }
+  }
+  async function syncLinkConfirm() {
+    const lp = linkPreview; linkPreview = null; linkOpen = false; linkInput = '';
+    sync = { code: lp.code, version: lp.version, at: 0 }; save('sg_sync', JSON.stringify(sync)); firstSync = true;
+    await syncRun();
+    if (!syncErr) syncMsg = `Linked: ${bookmarks.size} bookmarks, ${readVerses.size} verses read.`;
+  }
+  async function copyCode() {
+    try { await navigator.clipboard.writeText(sync.code); syncMsg = 'Code copied.'; } catch { syncMsg = 'Select the code and copy it.'; }
+  }
+  function syncStatus() {
+    if (syncBusy) return 'Saving…';
+    if (syncErr) return syncErr;
+    if (sync?.at) return 'Saved at ' + new Date(sync.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return '';
+  }
 
   $effect(() => { if (currentLang) { save('sg_lang', currentLang); ensureLang(currentLang); } });
   $effect(() => { save('sg_dark', darkMode ? '1' : '0'); });
@@ -413,6 +535,12 @@
             {#if streak > 1}
               <div class="home-streak">🔥 Day {streak} streak</div>
             {/if}
+            {#if !sync && readVerses.size >= 3 && !nudgeHidden}
+              <div class="home-nudge">
+                <button class="home-nudge-go" onclick={() => activeTab = 'profile'}>☁ Save your progress in the cloud →</button>
+                <button class="home-nudge-x" aria-label="Hide this" onclick={() => { nudgeHidden = true; save('sg_nudge', '1'); }}>×</button>
+              </div>
+            {/if}
           </div>
           <div class="home-header-right">
             <button class="lang-pill active" onclick={() => showLangPicker = true} aria-label="Change language">
@@ -596,6 +724,53 @@
         </div>
       </div>
 
+      <div class="section-label">Save your progress</div>
+      <div class="sync-card">
+        {#if !sync}
+          <p class="sync-lead">☁ Keep your progress safe</p>
+          <p class="sync-text">Save your bookmarks, your streak and where you stopped in the cloud, and continue on any phone or computer. No account, no email: you just get a short code.</p>
+          {#if !linkOpen}
+            <div class="sync-btns">
+              <button class="sync-btn primary" onclick={syncEnable} disabled={syncBusy}>{syncBusy ? 'One moment…' : 'Save my progress'}</button>
+              <button class="sync-btn" onclick={() => { linkOpen = true; syncErr = ''; syncMsg = ''; }}>I already have a code</button>
+            </div>
+          {:else}
+            <p class="sync-text">Type the code you got on your other device.</p>
+            <input class="sync-input" bind:value={linkInput} placeholder="KTMRBXWZ" autocapitalize="characters" autocomplete="off" spellcheck="false" maxlength="14"
+                   onkeydown={(e) => e.key === 'Enter' && syncLinkCheck()} />
+            <div class="sync-btns">
+              <button class="sync-btn primary" onclick={syncLinkCheck} disabled={syncBusy}>Continue</button>
+              <button class="sync-btn" onclick={() => { linkOpen = false; linkInput = ''; syncErr = ''; }}>Cancel</button>
+            </div>
+          {/if}
+        {:else}
+          <p class="sync-lead">☁ Your progress is saved</p>
+          <div class="sync-code" aria-label="Your code">{sync.code}</div>
+          <p class="sync-text">Write this code down. To continue on another device, open Scroll Gita there, go to Profile and choose <b>I already have a code</b>. Anyone with the code can see your bookmarks, so keep it private.</p>
+          <div class="sync-btns">
+            <button class="sync-btn" onclick={copyCode}>Copy code</button>
+            <button class="sync-btn" onclick={syncRun} disabled={syncBusy}>Save now</button>
+            <button class="sync-btn quiet" onclick={syncStop}>Stop saving</button>
+          </div>
+        {/if}
+        {#if syncStatus() || syncMsg}
+          <p class="sync-status" class:bad={!!syncErr && !syncBusy} aria-live="polite">{syncMsg && !syncErr ? syncMsg : syncStatus()}</p>
+        {/if}
+      </div>
+
+      {#if linkPreview}
+        <div class="sync-modal" role="dialog" aria-label="Link to this code?">
+          <div class="sync-modal-box">
+            <p class="sync-lead">Link to code {linkPreview.code}?</p>
+            <p class="sync-text">This code holds <b>{linkPreview.n.bookmarks}</b> bookmarks and <b>{linkPreview.n.read}</b> verses read. This device has <b>{bookmarks.size}</b> bookmarks and <b>{readVerses.size}</b> read. Linking combines both: nothing is deleted. Is this your code?</p>
+            <div class="sync-btns">
+              <button class="sync-btn primary" onclick={syncLinkConfirm}>Yes, link</button>
+              <button class="sync-btn" onclick={() => { linkPreview = null; }}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      {/if}
+
       <div class="section-label">Appearance</div>
       <div class="appearance-row">
         <button class="appear-btn" class:selected={!darkMode} onclick={() => darkMode = false}>Light</button>
@@ -627,7 +802,7 @@
       <button class="reset-fab" onclick={() => confirmReset = true}>Reset data</button>
     {:else}
       <div class="reset-confirm">
-        <p>This will delete your streak, bookmarks and read history. Continue?</p>
+        <p>This will delete your streak, bookmarks and read history{#if sync}, and also from your cloud copy and your other devices{/if}. Continue?</p>
         <div class="reset-confirm-btns">
           <button class="reset-cancel" onclick={() => confirmReset = false}>Cancel</button>
           <button class="reset-ok" onclick={() => {
@@ -636,6 +811,7 @@
             streak = 0;
             confirmReset = false;
             ['sg_bookmarks','sg_read','sg_streak','sg_last_visit'].forEach(k => localStorage.removeItem(k));
+            bmT = {}; readT = {}; ixT = [0, 0]; resetAt = Date.now(); persistT(); syncSoon(500);
           }}>Delete all</button>
         </div>
       </div>
@@ -1096,6 +1272,29 @@
   }
   .app.dark .profile-title { color: #d97706; }
 
+  /* ── Copia en la nube ───────────────────────────────────────────────── */
+  .sync-card { background: white; border-radius: 12px; padding: 0.9rem 1rem; font-family: system-ui, sans-serif; }
+  .app.dark .sync-card { background: #1e1b14; }
+  .sync-lead { font-weight: 700; font-size: 1rem; margin: 0 0 0.35rem; }
+  .sync-text { font-size: 0.86rem; line-height: 1.45; opacity: 0.75; margin: 0 0 0.7rem; }
+  .sync-code { font-family: ui-monospace, Menlo, monospace; font-size: 1.7rem; font-weight: 700; letter-spacing: 0.18em; text-align: center; padding: 0.55rem 0; margin: 0.2rem 0 0.7rem; background: rgba(180, 83, 9, 0.08); border-radius: 10px; user-select: all; }
+  .sync-input { width: 100%; box-sizing: border-box; font-family: ui-monospace, Menlo, monospace; font-size: 1.3rem; letter-spacing: 0.16em; text-transform: uppercase; text-align: center; padding: 0.55rem; border: 1px solid rgba(0,0,0,0.2); border-radius: 10px; background: transparent; color: inherit; margin-bottom: 0.7rem; }
+  .app.dark .sync-input { border-color: rgba(255,255,255,0.25); }
+  .sync-btns { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+  .sync-btn { background: transparent; border: 1px solid rgba(0,0,0,0.25); border-radius: 8px; padding: 0.5rem 0.9rem; font-size: 0.88rem; font-weight: 600; cursor: pointer; color: inherit; }
+  .app.dark .sync-btn { border-color: rgba(255,255,255,0.3); }
+  .sync-btn.primary { background: #b45309; border-color: #b45309; color: #fff; }
+  .sync-btn.quiet { border-color: transparent; opacity: 0.6; }
+  .sync-btn:disabled { opacity: 0.5; cursor: default; }
+  .sync-status { font-size: 0.78rem; opacity: 0.6; margin: 0.7rem 0 0; }
+  .sync-status.bad { color: #b91c1c; opacity: 1; }
+  .sync-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.45); display: flex; align-items: center; justify-content: center; padding: 1.2rem; z-index: 60; }
+  .sync-modal-box { background: #fffdf8; color: #2a2418; border-radius: 14px; padding: 1.1rem; max-width: 22rem; width: 100%; font-family: system-ui, sans-serif; }
+  .app.dark .sync-modal-box { background: #1e1b14; color: #eee6d4; }
+  .home-nudge { display: flex; align-items: center; gap: 0.3rem; margin-top: 0.35rem; }
+  .home-nudge-go { background: rgba(180, 83, 9, 0.1); border: none; border-radius: 999px; padding: 0.3rem 0.7rem; font-family: system-ui, sans-serif; font-size: 0.76rem; font-weight: 600; color: #b45309; cursor: pointer; }
+  .app.dark .home-nudge-go { color: #f0b45a; background: rgba(240, 180, 90, 0.12); }
+  .home-nudge-x { background: transparent; border: none; font-size: 1.1rem; opacity: 0.4; cursor: pointer; color: inherit; padding: 0 0.3rem; }
   .stat-row { display: flex; gap: 1rem; }
 
   .stat {
