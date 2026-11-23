@@ -70,6 +70,24 @@ python3 -I scripts/icon/make_icons.py                    # writes static/icons/*
 
 `scripts/icon/icon-1024.png` is the master image. The desktop and mobile icons in `src-tauri/icons/` (macOS, Windows, Android, iOS) are generated from it with `npx tauri icon scripts/icon/icon-1024.png`. The source is full-bleed because iOS and Android apply their own mask, so on macOS the icon has square corners.
 
+## Languages and accessibility
+
+**Languages.** The text is shown in 10 languages. The reading screens (Home, Gita, the language and purport sheets) are translated into each of the 9 non-English languages: tab labels, "today's verse", Today, Purport, the swipe hint, the chapter and verse pickers and the labels read aloud by screen readers. Chapter names are the established ones from vedabase.cc (`scripts/chapter_names.py` copies them into `src/lib/chapter-names.json`). **Profile** (cloud copy, install, reset) and the share sheet stay in English and are marked `lang="en"`.
+
+- The interface strings live in [`src/lib/i18n.js`](src/lib/i18n.js). A missing key falls back to English. **They were written by machine and have not been reviewed by native readers.**
+- Every block of verse text carries its own `lang`, and `<html lang>` follows the chosen language, so screen readers pick the right voice.
+- **Arabic** is laid out right to left (`dir="rtl"`, right-aligned). Transliteration in Hindi, Bengali, Chinese and Arabic is not italicised, because those scripts have no italics.
+- The Arabic data had a stray "." as the first line of 626 transliterations; `scripts/split_langs.py` removes it when it builds the language files.
+
+**Accessibility.**
+
+- Every control is at least 44×44 px and all text meets 4.5:1 contrast in the light and dark themes (checked with Impeccable's detector in 10 screens and states at 390 and 320 px).
+- Real landmarks and states: a named `nav`, `aria-current` on the active tab, `aria-pressed` on the bookmark and theme buttons, a labelled progress bar with its value, and no `role="application"`.
+- The language, purport and share sheets are modal dialogs: focus moves inside, stays inside with Tab and Shift+Tab, Esc closes them, and focus returns to the button that opened them ([`src/lib/a11y.js`](src/lib/a11y.js)).
+- A new verse is announced through a polite live region, and a "Previous verse" button is available to keyboard and screen-reader users (the swipe-down gesture has no equivalent for them). Arrow keys, Page Up and Page Down also change verse.
+- Visible keyboard focus ring in the app's ochre; the chevron bobs three times and stops; with `prefers-reduced-motion` all animations are off.
+- **Not tested yet:** a real screen reader (VoiceOver, TalkBack, NVDA), 200 % zoom, Windows high-contrast mode.
+
 ## Tech
 
 - [SvelteKit](https://svelte.dev/docs/kit) (Svelte 5 runes) with `adapter-static`, single-page app (`ssr = false`).
@@ -116,7 +134,8 @@ They are generated from `static/gita_all_langs.json` (665 verses × 10 languages
 ```bash
 python3 scripts/export_d1_gita.py   # export from D1 (needs access to that database)
 python3 scripts/clean_gita_json.py  # strip markdown artifacts
-python3 -I scripts/split_langs.py   # → static/data/core.json and static/data/<lang>.json
+python3 -I scripts/split_langs.py   # → static/data/core.json and static/data/<lang>.json (also cleans the stray "." in the Arabic transliteration)
+python3 -I scripts/chapter_names.py # → src/lib/chapter-names.json (chapter names in each language, from vedabase.cc)
 ```
 
 `scripts/parse_gita.py` is an earlier English-only parser kept for reference.
@@ -127,6 +146,8 @@ python3 -I scripts/split_langs.py   # → static/data/core.json and static/data/
 src/routes/+page.svelte   the whole app (Home, Gita, Profile)
 src/lib/sync.js           cloud copy: merge, pack, server client (pure, no DOM)
 src/app.html              page shell (noindex, PWA tags)
+src/lib/i18n.js           interface strings, language tags, chapter names
+src/lib/a11y.js           focus trap for dialogs
 src/service-worker.js     offline support (PWA)
 static/manifest.webmanifest, static/icons/   PWA manifest and icons
 scripts/icon/             source and scripts of the app icon

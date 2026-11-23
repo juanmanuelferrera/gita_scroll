@@ -2,6 +2,8 @@
   import { onMount } from 'svelte';
   import { base } from '$app/paths';
   import * as SY from '$lib/sync.js';
+  import { LANG_TAG, RTL, NON_LATIN, ui, chapterName } from '$lib/i18n.js';
+  import { trapFocus } from '$lib/a11y.js';
 
   // ── Data ─────────────────────────────────────────────────────────────────
   let verses   = $state([]);
@@ -10,6 +12,13 @@
   let packs    = $state({});          // código de idioma → { índice: textos }
   let loadingLang = $state(false);
   let ready    = $state(false);         // true cuando ya se leyeron las preferencias guardadas: hasta entonces los efectos NO deben escribirlas
+  // Textos de la interfaz de lectura y atributos de idioma/dirección de los textos del verso
+  const T = (k, v) => ui(currentLang, k, v);
+  const tag = $derived(LANG_TAG[currentLang] || 'en');
+  const txt = $derived({ lang: LANG_TAG[currentLang] || 'en', dir: RTL.has(currentLang) ? 'rtl' : 'ltr' });
+  const nolatin = $derived(NON_LATIN.has(currentLang));
+  let liveMsg = $state('');                  // región aria-live: anuncia el verso nuevo a los lectores de pantalla
+  let lastAnnounced = -1;
   let appEl = $state();                 // contenedor raíz (bind:this)
 
   // ── Copia en la nube (mismo servidor y código que Easy Study) ─────────────
@@ -87,7 +96,7 @@
     const result = [];
     for (let n = 1; n <= 18; n++) {
       const idx = verses.findIndex(v => v.chapter === n);
-      if (idx >= 0) result.push({ number: n, firstIndex: idx, name: CHAPTER_NAMES[n] });
+      if (idx >= 0) result.push({ number: n, firstIndex: idx, name: chapterName(currentLang, n, CHAPTER_NAMES[n]) });
     }
     return result;
   });
@@ -102,7 +111,8 @@
   // ── Navigation ────────────────────────────────────────────────────────────
   // Home = descubrimiento: hacia arriba sale un verso AL AZAR (prefiere los no leídos y no repite los últimos) y hacia abajo se vuelve atrás
   // por los que ya salieron. La pestaña Gita sigue siendo lectura en orden (verso a verso, capítulo a capítulo).
-  let homeHist = [], homePos = -1;
+  let homeHist = [];
+  let homePos = $state(-1);               // reactivo: decide si existe el botón «verso anterior»
   function pickRandom() {
     const recent = new Set(homeHist.slice(-40));
     const pool = [];
@@ -180,7 +190,7 @@
     if (activeTab !== 'gita' && activeTab !== 'home') return;
     if (e.key === 'ArrowDown' || e.key === 'PageDown' || e.key === 'ArrowRight') navigate(1);
     else if (e.key === 'ArrowUp' || e.key === 'PageUp' || e.key === 'ArrowLeft') navigate(-1);
-    else if (e.key === 'Escape') { showPurport = false; showShare = false; }
+    else if (e.key === 'Escape') { showPurport = false; showShare = false; showHomePurport = false; showLangPicker = false; }
   }
 
   // El texto de un verso largo se desplaza por dentro: solo cambia de verso si ya estás en el borde (arriba o abajo) de ese texto.
@@ -410,6 +420,12 @@
   }
 
   $effect(() => { if (ready && currentLang) { save('sg_lang', currentLang); ensureLang(currentLang); } });
+  $effect(() => { document.documentElement.lang = tag; });
+  $effect(() => {
+    if (!ready || !verse) return;
+    if (lastAnnounced === -1) { lastAnnounced = currentIndex; return; }
+    if (currentIndex !== lastAnnounced) { lastAnnounced = currentIndex; liveMsg = `Bhagavad-gītā ${formatRef(verse.ref)}`; }
+  });
   $effect(() => {
     if (!ready) return;
     save('sg_dark', darkMode ? '1' : '0');
@@ -600,13 +616,15 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
+<!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
   bind:this={appEl}
   class="app"
   class:dark={darkMode}
+  lang={tag}
   onwheel={handleWheel}
-  role="application"
 >
+  <div class="sr-only" aria-live="polite" aria-atomic="true">{liveMsg}</div>
   <!-- ══════════════════ HOME TAB ══════════════════ -->
   {#if activeTab === 'home'}
     <div class="screen home-screen" use:swipeable>
@@ -623,11 +641,11 @@
             {/if}
           </div>
           <div class="home-header-right">
-            <button class="lang-pill active" onclick={() => showLangPicker = true} aria-label="Change language">
+            <button class="lang-pill active" onclick={() => showLangPicker = true} aria-label={T('changeLanguage')}>
               {langLabel(currentLang)}
               <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" style="margin-left:3px;opacity:0.7"><path d="M7 10l5 5 5-5z"/></svg>
             </button>
-            <button class="icon-btn" onclick={() => darkMode = !darkMode} aria-label="Toggle theme">
+            <button class="icon-btn" onclick={() => darkMode = !darkMode} aria-label={T('toggleTheme')} aria-pressed={darkMode}>
               {#if darkMode}
                 <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
               {:else}
@@ -655,43 +673,44 @@
         >
           <div class="home-card-header">
             {#if isToday}
-              <span class="today-label">TODAY'S VERSE</span>
+              <span class="today-label">{T('todayVerse')}</span>
               <span class="today-label-dot">·</span>
             {/if}
             <span class="home-ref-badge">Bhagavad-gītā {formatRef(verse.ref)}</span>
           </div>
           <div class="home-devanagari">{verse.devanagari.replace(/\s*॥[०-९\d]+॥\s*$/, '').split('\n').slice(0, 2).join('\n')}</div>
           {#if tl.transliteration}
-            <div class="home-translit">{tl.transliteration.split('\n').slice(0, 4).join('\n')}</div>
+            <div class="home-translit" class:nolatin {...txt}>{tl.transliteration.split('\n').slice(0, 4).join('\n')}</div>
           {/if}
-          <div class="translation home-translation">{tl.translation}</div>
+          <div class="translation home-translation" {...txt}>{tl.translation}</div>
 
         </div>
 
         <!-- Pista de gesto: asoma la tarjeta siguiente y un chevron que rebota -->
         {#if true}
+          {#if homePos > 0}<button class="sr-only sr-focusable" onclick={() => navigate(-1)}>{T('prevVerse')}</button>{/if}
           <div class="peek" aria-hidden="true"></div>
-          <button class="swipe-cue" onclick={() => navigate(1)} aria-label="Next verse">
+          <button class="swipe-cue" onclick={() => navigate(1)} aria-label={T('nextVerse')}>
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><polyline points="18 15 12 9 6 15"/></svg>
-            {#if !hintSeen}<span>Swipe up for the next verse</span>{/if}
+            {#if !hintSeen}<span>{T('swipe')}</span>{/if}
           </button>
         {/if}
 
         <!-- Actions + meta (single row) -->
         <div class="home-bar">
-          <button class="icon-btn" class:bookmarked={isBookmarked} onclick={toggleBookmark} aria-label="Bookmark">
+          <button class="icon-btn" class:bookmarked={isBookmarked} onclick={toggleBookmark} aria-label={T('bookmark')} aria-pressed={isBookmarked}>
             <svg width="20" height="20" viewBox="0 0 24 24" fill={isBookmarked ? 'currentColor' : 'none'} stroke="currentColor" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
           </button>
-          <button class="icon-btn" onclick={() => showShare = true} aria-label="Share">
+          <button class="icon-btn" onclick={() => showShare = true} aria-label={T('share')}>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
           </button>
-          <button class="text-btn home-today-btn" class:active={isToday} onclick={() => goToVerse(todayIndex())} aria-label="Go to today's verse">Today</button>
+          <button class="text-btn home-today-btn" class:active={isToday} onclick={() => goToVerse(todayIndex())} aria-label={T('goToday')}>{T('today')}</button>
           {#if tl.purport}
-            <button class="text-btn home-purport-btn" onclick={() => showHomePurport = true}>Purport</button>
+            <button class="text-btn home-purport-btn" onclick={() => showHomePurport = true}>{T('purport')}</button>
           {/if}
         </div>
       {:else}
-        <div class="loading">{loadError || 'Loading…'}</div>
+        <div class="loading">{loadError || T('loading')}</div>
       {/if}
     </div>
   {/if}
@@ -709,10 +728,10 @@
               const ch = chapters().find(c => c.number === parseInt(e.target.value));
               if (ch) goToVerse(ch.firstIndex);
             }}
-            aria-label="Select chapter"
+            aria-label={T('selectChapter')}
           >
             {#each chapters() as ch}
-              <option value={ch.number}>Ch {ch.number} · {ch.name}</option>
+              <option value={ch.number}>{T('ch', { n: ch.number })} · {ch.name}</option>
             {/each}
           </select>
         </div>
@@ -725,7 +744,7 @@
               const v = chapterVerses().find(v => formatRef(v.ref) === e.target.value);
               if (v) goToVerse(v.index);
             }}
-            aria-label="Select verse"
+            aria-label={T('selectVerse')}
           >
             {#each chapterVerses() as v}
               <option value={formatRef(v.ref)}>{formatRef(v.ref)}</option>
@@ -733,14 +752,14 @@
           </select>
         </div>
 
-        <button class="lang-pill active" onclick={() => showLangPicker = true} aria-label="Change language">
+        <button class="lang-pill active" onclick={() => showLangPicker = true} aria-label={T('changeLanguage')}>
           {langLabel(currentLang)}
           <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" style="margin-left:3px;opacity:0.7"><path d="M7 10l5 5 5-5z"/></svg>
         </button>
       </div>
 
       <!-- Progress bar -->
-      <div class="progress-bar" role="progressbar">
+      <div class="progress-bar" role="progressbar" aria-label={T('progress')} aria-valuemin="1" aria-valuemax={total} aria-valuenow={currentIndex + 1}>
         <div class="progress-fill" style="width:{progress * 100}%"></div>
       </div>
 
@@ -756,31 +775,32 @@
           <div class="gita-verse-ref">Bhagavad-gītā {formatRef(verse.ref)}</div>
           <div class="devanagari centered">{verse.devanagari.replace(/\s*॥[०-९\d]+॥\s*$/, '')}</div>
           {#if langData.transliteration}
-            <div class="transliteration centered">{langData.transliteration}</div>
+            <div class="transliteration centered" class:nolatin {...txt}>{langData.transliteration}</div>
           {/if}
-          <div class="translation gita-translation">{langData.translation}</div>
+          <div class="translation gita-translation" {...txt}>{langData.translation}</div>
         </div>
       {:else}
-        <div class="loading">{loadError || 'Loading…'}</div>
+        <div class="loading">{loadError || T('loading')}</div>
       {/if}
 
+      {#if verse && currentIndex > 0}<button class="sr-only sr-focusable" onclick={() => navigate(-1)}>{T('prevVerse')}</button>{/if}
       {#if verse && currentIndex < total - 1}
-        <button class="swipe-cue" onclick={() => navigate(1)} aria-label="Next verse">
+        <button class="swipe-cue" onclick={() => navigate(1)} aria-label={T('nextVerse')}>
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><polyline points="18 15 12 9 6 15"/></svg>
-          {#if !hintSeen}<span>Swipe up for the next verse</span>{/if}
+          {#if !hintSeen}<span>{T('swipe')}</span>{/if}
         </button>
       {/if}
 
       <!-- Bottom action bar -->
       <div class="gita-bottom">
-        <button class="icon-btn" class:bookmarked={isBookmarked} onclick={toggleBookmark} aria-label="Bookmark">
+        <button class="icon-btn" class:bookmarked={isBookmarked} onclick={toggleBookmark} aria-label={T('bookmark')} aria-pressed={isBookmarked}>
           <svg width="20" height="20" viewBox="0 0 24 24" fill={isBookmarked ? 'currentColor' : 'none'} stroke="currentColor" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
         </button>
-        <button class="icon-btn" onclick={() => showShare = true} aria-label="Share">
+        <button class="icon-btn" onclick={() => showShare = true} aria-label={T('share')}>
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
         </button>
         {#if langData.purport}
-          <button class="pill-btn purport-pill" onclick={() => showPurport = true}>Purport</button>
+          <button class="pill-btn purport-pill" onclick={() => showPurport = true}>{T('purport')}</button>
         {/if}
       </div>
     </div>
@@ -788,7 +808,7 @@
 
   <!-- ══════════════════ PROFILE TAB ══════════════════ -->
   {#if activeTab === 'profile'}
-    <div class="screen profile-screen">
+    <div class="screen profile-screen" lang="en">
       <h2 class="profile-title">Profile</h2>
 
       <div class="stat-row">
@@ -939,18 +959,18 @@
   {/if}
 
   <!-- ══════════════════ TAB BAR ══════════════════ -->
-  <nav class="tab-bar">
-    <button class="tab" class:active={activeTab === 'home'} onclick={() => activeTab = 'home'}>
+  <nav class="tab-bar" aria-label={T('mainNav')}>
+    <button class="tab" class:active={activeTab === 'home'} aria-current={activeTab === 'home' ? 'page' : undefined} onclick={() => activeTab = 'home'}>
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9,22 9,12 15,12 15,22"/></svg>
-      <span>Home</span>
+      <span>{T('home')}</span>
     </button>
-    <button class="tab" class:active={activeTab === 'gita'} onclick={() => activeTab = 'gita'}>
+    <button class="tab" class:active={activeTab === 'gita'} aria-current={activeTab === 'gita' ? 'page' : undefined} onclick={() => activeTab = 'gita'}>
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
-      <span>Gita</span>
+      <span>{T('gita')}</span>
     </button>
-    <button class="tab" class:active={activeTab === 'profile'} onclick={() => activeTab = 'profile'}>
+    <button class="tab" class:active={activeTab === 'profile'} aria-current={activeTab === 'profile' ? 'page' : undefined} onclick={() => activeTab = 'profile'}>
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-      <span>Profile</span>
+      <span>{T('profile')}</span>
     </button>
   </nav>
 
@@ -962,11 +982,11 @@
         ontouchstart={(e) => e.stopPropagation()}
         ontouchend={(e) => e.stopPropagation()}
         ontouchmove={(e) => e.stopPropagation()}
-        role="dialog" aria-label="Select language">
+        role="dialog" aria-modal="true" tabindex="-1" aria-labelledby="lang-title" use:trapFocus>
         <div class="sheet-handle"></div>
         <div class="sheet-header">
-          <span class="sheet-title">Language</span>
-          <button class="icon-btn" onclick={() => showLangPicker = false} aria-label="Close">×</button>
+          <span class="sheet-title" id="lang-title">{T('language')}</span>
+          <button class="icon-btn" onclick={() => showLangPicker = false} aria-label={T('close')}>×</button>
         </div>
         <div class="lang-picker-list">
           {#each languages as lang}
@@ -975,7 +995,7 @@
               class:selected={currentLang === lang.code}
               onclick={() => { currentLang = lang.code; showLangPicker = false; }}
             >
-              <span class="lang-native">{lang.name}</span>
+              <span class="lang-native" lang={LANG_TAG[lang.code]}>{lang.name}</span>
               <span class="lang-code">{langLabel(lang.code)}</span>
               {#if currentLang === lang.code}
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
@@ -995,14 +1015,14 @@
         ontouchstart={(e) => e.stopPropagation()}
         ontouchend={(e) => e.stopPropagation()}
         ontouchmove={(e) => e.stopPropagation()}
-        role="dialog" aria-label="Purport">
+        role="dialog" aria-modal="true" tabindex="-1" aria-labelledby="purport-title" use:trapFocus>
         <div class="sheet-handle"></div>
         <div class="sheet-header">
-          <span class="sheet-title">Purport · BG {formatRef(verse.ref)}</span>
-          <button class="icon-btn" onclick={() => showHomePurport = false} aria-label="Close">×</button>
+          <span class="sheet-title" id="purport-title">{T('purport')} · BG {formatRef(verse.ref)}</span>
+          <button class="icon-btn" onclick={() => showHomePurport = false} aria-label={T('close')}>×</button>
         </div>
         <div class="sheet-body">
-          <p class="purport-text">{langData.purport}</p>
+          <p class="purport-text" {...txt}>{langData.purport}</p>
         </div>
       </div>
     </div>
@@ -1016,14 +1036,14 @@
         ontouchstart={(e) => e.stopPropagation()}
         ontouchend={(e) => e.stopPropagation()}
         ontouchmove={(e) => e.stopPropagation()}
-        role="dialog" aria-label="Purport">
+        role="dialog" aria-modal="true" tabindex="-1" aria-labelledby="purport-title" use:trapFocus>
         <div class="sheet-handle"></div>
         <div class="sheet-header">
-          <span class="sheet-title">Purport · BG {formatRef(verse?.ref)}</span>
-          <button class="icon-btn" onclick={() => showPurport = false} aria-label="Close">×</button>
+          <span class="sheet-title" id="purport-title">{T('purport')} · BG {formatRef(verse?.ref)}</span>
+          <button class="icon-btn" onclick={() => showPurport = false} aria-label={T('close')}>×</button>
         </div>
         <div class="sheet-body">
-          <p class="purport-text">{langData.purport}</p>
+          <p class="purport-text" {...txt}>{langData.purport}</p>
         </div>
       </div>
     </div>
@@ -1037,20 +1057,20 @@
         ontouchstart={(e) => e.stopPropagation()}
         ontouchend={(e) => e.stopPropagation()}
         ontouchmove={(e) => e.stopPropagation()}
-        role="dialog" aria-label="Share verse">
+        role="dialog" aria-modal="true" tabindex="-1" aria-labelledby="share-title" lang="en" use:trapFocus>
         <div class="sheet-handle"></div>
         <div class="sheet-header">
-          <span class="sheet-title">Share · BG {formatRef(verse.ref)}</span>
-          <button class="icon-btn" onclick={() => showShare = false} aria-label="Close">×</button>
+          <span class="sheet-title" id="share-title">Share · BG {formatRef(verse.ref)}</span>
+          <button class="icon-btn" onclick={() => showShare = false} aria-label={T('close')}>×</button>
         </div>
         <div class="sheet-body share-body">
           <!-- Card preview -->
           <div class="share-card">
-            <div class="share-devanagari">{verse.devanagari}</div>
+            <div class="share-devanagari" lang="sa">{verse.devanagari}</div>
             {#if langData.transliteration}
-              <div class="share-translit">{langData.transliteration}</div>
+              <div class="share-translit" class:nolatin {...txt}>{langData.transliteration}</div>
             {/if}
-            <div class="share-translation">{langData.translation}</div>
+            <div class="share-translation" {...txt}>{langData.translation}</div>
             <div class="share-footer">
               <div class="share-ref">Bhagavad-gītā {formatRef(verse.ref)}</div>
               <div class="share-attr">Scroll Gita</div>
@@ -1340,11 +1360,11 @@
   .swipe-cue {
     display: flex; align-items: center; justify-content: center; gap: 0.35rem; align-self: center; flex-shrink: 0;
     background: none; border: none; color: #b45309; cursor: pointer; min-height: 44px; padding: 0 0.8rem;
-    font-family: system-ui, sans-serif; font-size: 0.78rem; font-weight: 600; animation: cue-bob 1.7s ease-in-out infinite;
+    font-family: system-ui, sans-serif; font-size: 0.78rem; font-weight: 600; animation: cue-bob 1.7s ease-in-out 3;
   }
   .app.dark .swipe-cue { color: #f0b45a; }
   .swipe-cue:active { opacity: 0.6; }
-  @keyframes cue-bob { 0%, 100% { transform: translateY(2px); opacity: 0.55; } 50% { transform: translateY(-4px); opacity: 1; } }
+  @keyframes cue-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
   .peek { flex-shrink: 0; height: 12px; margin: -0.55rem 1.1rem 0; border-radius: 0 0 14px 14px; background: white; opacity: 0.7; box-shadow: 0 2px 6px rgba(0,0,0,0.07); }
   .app.dark .peek { background: #1e1b14; opacity: 0.8; }
   @media (prefers-reduced-motion: reduce) { .swipe-cue { animation: none; } }
@@ -1401,6 +1421,24 @@
   .home-nudge-go { background: rgba(180, 83, 9, 0.1); border: none; border-radius: 999px; padding: 0.3rem 0.7rem; font-family: system-ui, sans-serif; font-size: 0.76rem; font-weight: 600; color: #92400e; cursor: pointer; min-height: 44px; white-space: nowrap; }
   .app.dark .home-nudge-go { color: #f0b45a; background: rgba(240, 180, 90, 0.12); }
   .home-nudge-x { background: transparent; border: none; font-size: 1.1rem; opacity: 0.6; cursor: pointer; color: inherit; padding: 0; min-width: 44px; min-height: 44px; margin-left: -0.5rem; }
+  /* ── Accesibilidad ─────────────────────────────────────────────────── */
+  .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; border: 0; }
+  .sr-focusable:focus { position: static; width: auto; height: auto; margin: 0.2rem auto; padding: 0.4rem 0.9rem; overflow: visible; clip: auto; clip-path: none; background: #b45309; color: #fff; border-radius: 999px; font-family: system-ui, sans-serif; font-size: 0.8rem; font-weight: 600; align-self: center; min-height: 44px; display: inline-flex; align-items: center; }
+  /* anillo de foco del teclado con la paleta (el azul por defecto del navegador desentona) */
+  .app :focus-visible { outline: 2px solid #b45309; outline-offset: 2px; border-radius: 6px; }
+  .app.dark :focus-visible { outline-color: #f0b45a; }
+  .app :focus:not(:focus-visible) { outline: none; }
+  /* textos del verso: escritura de derecha a izquierda y sin cursiva sintética donde esa escritura no la tiene */
+  .translation[dir='rtl'], .purport-text[dir='rtl'], .share-translation[dir='rtl'] { text-align: right; }
+  .transliteration.nolatin, .home-translit.nolatin, .share-translit.nolatin { font-style: normal; }
+  @media (prefers-reduced-motion: reduce) {
+    .enter-up, .enter-down { animation: none; }
+    .slide-out-up, .slide-out-down { transform: none; transition: none; }
+    .bottom-sheet, .overlay { animation: none; }
+    .app { transition: none; }
+    .swipe-cue { animation: none; }
+  }
+
   .stat-row { display: flex; gap: 1rem; }
 
   .stat {
