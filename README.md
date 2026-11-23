@@ -66,7 +66,7 @@ node scripts/icon/render.mjs                             # draws the 1024 px PNG
 python3 -I scripts/icon/make_icons.py                    # writes static/icons/* and static/favicon.png
 ```
 
-`scripts/icon/icon-1024.png` is the master image. It can also feed the desktop and mobile icons: `npx tauri icon scripts/icon/icon-1024.png` (the Tauri icons in `src-tauri/icons/` are still the default ones).
+`scripts/icon/icon-1024.png` is the master image. The desktop and mobile icons in `src-tauri/icons/` (macOS, Windows, Android, iOS) are generated from it with `npx tauri icon scripts/icon/icon-1024.png`. The source is full-bleed because iOS and Android apply their own mask, so on macOS the icon has square corners.
 
 ## Tech
 
@@ -98,7 +98,7 @@ The site is served under a sub-path, so the base path is set at build time (the 
 BASE_PATH=/scrollgita npm run build
 ```
 
-The output is in `build/`. For vedabase.cc it is copied to `public/scrollgita/` in the `astro_vedabase` repo **without** the big source files (`gita_all_langs.json`, `gita.json`, the three `.svg` placeholders), and deployed with the rest of the site. Copy the rest of `build/` whole: the service worker lists every compiled file and a missing one makes its installation fail. After building for the web, rebuild without `BASE_PATH` before packaging the Tauri app.
+The output is in `build/`. For vedabase.cc it is copied to `public/scrollgita/` in the `astro_vedabase` repo **without** the big source files (`gita_all_langs.json`, `gita.json`, the three `.svg` placeholders), and deployed with the rest of the site. Copy the rest of `build/` whole: the service worker lists every compiled file and a missing one makes its installation fail. On vedabase.cc every `.js` file is served with `Cache-Control: immutable` (rule `/*.js` in `public/_headers`), and `service-worker.js` has no hash in its name, so **purge `/scrollgita/service-worker.js` (and `/scrollgita/`) after every deploy**; browsers check for a new worker bypassing that cache, but Cloudflare's edge does not. After building for the web, rebuild without `BASE_PATH` before packaging the Tauri app.
 
 ## Data
 
