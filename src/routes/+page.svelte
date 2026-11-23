@@ -22,6 +22,18 @@
   let linkInput = $state('');
   let linkPreview = $state(null);      // { code, version, remote, n:{bookmarks,read,streak} }
   let nudgeHidden = $state(false);
+  // ── Instalar como app (PWA) ─────────────────────────────────────────────
+  let installEvt = $state(null);       // evento `beforeinstallprompt` (Chrome, Edge, Android): permite instalar con un toque
+  let installed  = $state(false);      // ya instalada / abierta como app
+  let isIOS      = $state(false);      // iPhone/iPad (Safari): no hay botón; se enseñan los pasos
+  let showIOS    = $state(false);
+  let inTauri    = false;
+  const canInstall = $derived(!installed && !inTauri && (installEvt !== null || isIOS));
+  async function installApp() {
+    if (!installEvt) return;
+    const e = installEvt; installEvt = null;
+    try { await e.prompt(); const { outcome } = await e.userChoice; if (outcome === 'accepted') installed = true; } catch {}
+  }
   let syncOpen = $state(true);         // tarjeta «Your progress is saved»: desplegada o reducida a una línea
   function setSyncOpen(v) { syncOpen = v; save('sg_sync_open', v ? '1' : '0'); }
   let syncTimer = null, applying = false, syncLast = 0, firstSync = true;
@@ -284,6 +296,11 @@
     loadT();
     nudgeHidden = load('sg_nudge') === '1';
     syncOpen = load('sg_sync_open') !== '0';
+    inTauri = '__TAURI_INTERNALS__' in window || '__TAURI__' in window;
+    installed = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+    isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvt = e; });
+    window.addEventListener('appinstalled', () => { installed = true; installEvt = null; });
     hintSeen = load('sg_hint') === '1';
     if (sync) syncRun();
     document.addEventListener('visibilitychange', () => {
@@ -785,6 +802,23 @@
           <div class="stat-label">Read</div>
         </div>
       </div>
+
+      {#if canInstall}
+        <div class="section-label">Install the app</div>
+        <div class="sync-card">
+          <p class="sync-text" style="margin-bottom:0.7rem">Add Scroll Gita to your home screen: it opens full screen and works without a connection.</p>
+          {#if installEvt}
+            <div class="sync-btns"><button class="sync-btn primary" onclick={installApp}>Install</button></div>
+          {:else}
+            <div class="sync-btns"><button class="sync-btn primary" onclick={() => showIOS = !showIOS} aria-expanded={showIOS}>How to install</button></div>
+            {#if showIOS}
+              <p class="sync-text" style="margin:0.7rem 0 0">In Safari, tap <b>Share</b>
+                <svg class="inline-share" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V3M8 7l4-4 4 4M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/></svg>
+                at the bottom of the screen, then choose <b>Add to Home Screen</b>.</p>
+            {/if}
+          {/if}
+        </div>
+      {/if}
 
       <div class="section-label">Save your progress</div>
       <div class="sync-card">
@@ -1339,6 +1373,7 @@
   .sync-code { font-family: ui-monospace, Menlo, monospace; font-size: 1.7rem; font-weight: 700; letter-spacing: 0.18em; text-align: center; padding: 0.55rem 0; margin: 0.2rem 0 0.7rem; background: rgba(180, 83, 9, 0.08); border-radius: 10px; user-select: all; }
   .sync-input { width: 100%; box-sizing: border-box; font-family: ui-monospace, Menlo, monospace; font-size: 1.3rem; letter-spacing: 0.16em; text-transform: uppercase; text-align: center; padding: 0.55rem; border: 1px solid rgba(0,0,0,0.2); border-radius: 10px; background: transparent; color: inherit; margin-bottom: 0.7rem; }
   .app.dark .sync-input { border-color: rgba(255,255,255,0.25); }
+  .inline-share { vertical-align: -3px; }
   .sync-btns { display: flex; flex-wrap: wrap; gap: 0.5rem; }
   .sync-btn { background: transparent; border: 1px solid rgba(0,0,0,0.25); border-radius: 8px; padding: 0.5rem 0.9rem; font-size: 0.88rem; font-weight: 600; cursor: pointer; color: inherit; min-height: 44px; }
   .app.dark .sync-btn { border-color: rgba(255,255,255,0.3); }

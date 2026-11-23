@@ -32,6 +32,7 @@ Scroll Gita is a Progressive Web App: you can put it on your home screen, open i
 
 **Install**
 
+- **Quickest:** open **Profile**. If your browser can install the app, an **Install the app** card appears at the top. On Android and desktop Chrome/Edge the **Install** button does it in one tap; on iPhone and iPad it shows the two steps (**How to install**). The card disappears once the app is installed, when it is already open as an app, and in the desktop (Tauri) build; browsers that cannot install web apps (for example desktop Firefox) never see it.
 - **Android (Chrome):** open <https://vedabase.cc/scrollgita/>, menu ⋮ → **Install app** (or **Add to Home screen**).
 - **iPhone / iPad (Safari):** Share → **Add to Home Screen**. (iOS has no install button; this is the only way.)
 - **Desktop (Chrome, Edge):** the install icon at the right end of the address bar.
@@ -49,6 +50,7 @@ Scroll Gita is a Progressive Web App: you can put it on your home screen, open i
 |---|---|---|
 | Manifest | [`static/manifest.webmanifest`](static/manifest.webmanifest) | Name, icons, colours, `standalone` display. Paths are relative, so it works at `/scrollgita/` and at the root. |
 | Service worker | [`src/service-worker.js`](src/service-worker.js) | SvelteKit builds and registers it. Precaches the app files and icons plus `data/core.json` and `data/en.json`; language files are cached on first use; navigation is network-first. |
+| Install button | `src/routes/+page.svelte` (Profile) | Listens for the browser's `beforeinstallprompt` event and calls it on tap; on iOS shows the Add to Home Screen steps. |
 | Page tags | [`src/app.html`](src/app.html) | Manifest link, `apple-touch-icon`, `theme-color`, iOS web-app tags. The theme colour follows the light/dark switch. |
 | Icons | `static/icons/`, `static/favicon.png` | 192 and 512 px "any" icons with rounded corners, a full-bleed 512 px "maskable" icon, and a 180 px iOS icon. |
 
