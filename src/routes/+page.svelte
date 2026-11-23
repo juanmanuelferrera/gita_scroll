@@ -46,19 +46,22 @@
   let isBookmarked = $derived(bookmarks.has(currentIndex));
   let progress = $derived(total > 0 ? currentIndex / (total - 1) : 0);
 
-  // Today's verse = first unread verse starting from the day's natural position
-  let todayIndex = $derived(() => {
+  // Today's verse = first unread verse starting from the day's natural position.
+  // The front matter (dedication, preface…: chapter 0) is skipped so the first thing a reader sees is a real verse.
+  function pickToday(read) {
     if (!total) return 0;
-    const base = Math.floor(Date.now() / 86400000) % total;
-    // If all read, fall back to base
-    if (readVerses.size >= total) return base;
+    const first = Math.max(0, verses.findIndex(v => v.chapter >= 1));
+    const n = total - first;
+    const base = first + (Math.floor(Date.now() / 86400000) % n);
+    if (read.size >= n) return base;
     let idx = base;
-    for (let i = 0; i < total; i++) {
-      if (!readVerses.has(idx)) return idx;
-      idx = (idx + 1) % total;
+    for (let i = 0; i < n; i++) {
+      if (!read.has(idx)) return idx;
+      idx = idx + 1 >= total ? first : idx + 1;
     }
     return base;
-  });
+  }
+  let todayIndex = $derived(() => pickToday(readVerses));
 
   // Chapter list
   let chapters = $derived(() => {
@@ -212,8 +215,9 @@
       return;
     }
 
-    const idx = parseInt(load('sg_index', '0'));
-    currentIndex = idx < total ? idx : 0;
+    const savedIdx = load('sg_index');           // primera visita: nada guardado → ya se abre el verso de hoy, sin tener que pulsar «Today»
+    const idx = savedIdx === '' ? -1 : parseInt(savedIdx);
+    currentIndex = idx >= 0 && idx < total ? idx : pickToday(new Set());
     currentLang  = load('sg_lang', 'en');
     darkMode     = load('sg_dark') === '1';
     const bm = load('sg_bookmarks');
