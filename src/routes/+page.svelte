@@ -9,6 +9,7 @@
   let total    = $state(0);
   let packs    = $state({});          // código de idioma → { índice: textos }
   let loadingLang = $state(false);
+  let ready    = $state(false);         // true cuando ya se leyeron las preferencias guardadas: hasta entonces los efectos NO deben escribirlas
   let appEl = $state();                 // contenedor raíz (bind:this)
 
   // ── Copia en la nube (mismo servidor y código que Easy Study) ─────────────
@@ -274,6 +275,7 @@
     resetHomeHist(currentIndex);
     currentLang  = load('sg_lang', 'en');
     darkMode     = load('sg_dark') === '1';
+    ready = true;                                // a partir de aquí los cambios del usuario sí se guardan
     const bm = load('sg_bookmarks');
     if (bm) bookmarks = new Set(JSON.parse(bm));
     const rd = load('sg_read');
@@ -387,8 +389,8 @@
     return '';
   }
 
-  $effect(() => { if (currentLang) { save('sg_lang', currentLang); ensureLang(currentLang); } });
-  $effect(() => { save('sg_dark', darkMode ? '1' : '0'); });
+  $effect(() => { if (ready && currentLang) { save('sg_lang', currentLang); ensureLang(currentLang); } });
+  $effect(() => { if (ready) save('sg_dark', darkMode ? '1' : '0'); });
   $effect(() => { if (activeTab !== 'profile') confirmReset = false; });
 
   // ── Helpers ───────────────────────────────────────────────────────────────
